@@ -95,19 +95,19 @@ function App() {
     let mounted = true;
     const refresh = async () => {
       try {
-        const [nextStatus, localAddresses] = await Promise.all([
-          invoke<DesktopStatus>("get_status"),
-          invoke<LocalAddress[]>("get_local_addresses"),
-        ]);
+        const nextStatus = await invoke<DesktopStatus>("get_status");
         if (!mounted) return;
         setStatus(nextStatus);
-        setAddresses(localAddresses);
         setBackendError(null);
-        setSettings((current) => current.bindIp || !localAddresses.length ? current : { ...current, bindIp: localAddresses[0].ip });
       } catch (error) {
         if (mounted) setBackendError(String(error));
       }
     };
+    void invoke<LocalAddress[]>("get_local_addresses").then((localAddresses) => {
+      if (!mounted) return;
+      setAddresses(localAddresses);
+      setSettings((current) => current.bindIp || !localAddresses.length ? current : { ...current, bindIp: localAddresses[0].ip });
+    }).catch((error) => { if (mounted) setBackendError(String(error)); });
     void refresh();
     const timer = window.setInterval(() => void refresh(), 200);
     return () => { mounted = false; window.clearInterval(timer); };
@@ -148,7 +148,7 @@ function App() {
     }
   }
 
-  const connectionMessage = status.error ?? backendError ?? (status.connection === "connected"
+  const connectionMessage = backendError ?? (status.connection === "connected"
     ? `Receiving live audio from ${status.phoneAddress ?? "your phone"}.`
     : active ? "Listening on your Wi-Fi interface. Start the Android sender to connect."
       : "Start Voxlink to create the virtual microphone and listen for your phone.");
@@ -189,9 +189,9 @@ function App() {
 
         <section className="panel mic-panel">
           <div className="panel-heading"><div><span className="eyebrow">02 / LINUX INPUT</span><h2>Virtual microphone</h2></div><div className={`device-icon ${status.virtualMicrophone}`}><Icon name="mic" size={21} /></div></div>
-          <div className="device-row"><div className="device-bullet"><span /></div><div className="device-copy"><strong>{status.virtualSource ?? "Voxlink Microphone"}</strong><span>{status.virtualMicrophone === "ready" ? "PulseAudio · PipeWire compatibility" : status.virtualMicrophone === "error" ? "Unavailable · see diagnostics" : "Created while the receiver is running"}</span></div><span className={`device-status ${status.virtualMicrophone}`}>{status.virtualMicrophone === "ready" ? "READY" : status.virtualMicrophone === "error" ? "ERROR" : "OFF"}</span></div>
+          <div className={`device-row ${status.virtualMicrophone}`}><div className="device-bullet"><span /></div><div className="device-copy"><strong>{status.virtualSource ?? "Voxlink Microphone"}</strong><span>{status.virtualMicrophone === "ready" ? "PulseAudio · PipeWire compatibility" : status.virtualMicrophone === "error" ? "Unavailable · see diagnostics" : "Created while the receiver is running"}</span></div><span className={`device-status ${status.virtualMicrophone}`}>{status.virtualMicrophone === "ready" ? "READY" : status.virtualMicrophone === "error" ? "ERROR" : "OFF"}</span></div>
           <div className="meter-wrap"><div className="meter-head"><span>LIVE INPUT LEVEL</span><span>{status.inputPeakDbfs == null ? "— dBFS" : `${status.inputPeakDbfs.toFixed(1)} dBFS`}</span></div><div className="meter-track"><div className="meter-fill" style={{ width: meterWidth }} /><div className="meter-ticks"><i /><i /><i /><i /><i /><i /><i /><i /><i /></div></div><div className="meter-scale"><span>−60</span><span>−36</span><span>−18</span><span>−6</span><span>0 dBFS</span></div></div>
-          <p className="mic-footnote"><Icon name="check" size={15} /> Appears in Discord, OBS and browser input lists as a monitor source.</p>
+          <p className={`mic-footnote ${status.error ? "has-error" : ""}`}><Icon name={status.error ? "activity" : "check"} size={15} /> {status.error ?? "Appears in Discord, OBS and browser input lists as a monitor source."}{status.recovery && <span className="recovery-guidance">{status.recovery}</span>}</p>
         </section>
 
         <section className="panel stream-panel">
