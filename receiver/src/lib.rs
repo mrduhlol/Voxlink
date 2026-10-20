@@ -47,3 +47,26 @@ impl AudioPacket<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{AudioPacket, PacketError};
+
+    #[test]
+    fn parses_vxl1_header_and_pcm_payload() {
+        let bytes = [*b"VXL1", 0, 0, 0, 7, 0, 0, 0, 0xBB, 0x80, 0x34, 0x12];
+        let packet = AudioPacket::parse(&bytes).unwrap();
+        assert_eq!(packet.sequence, 7);
+        assert_eq!(packet.sample_rate, 48_000);
+        assert_eq!(packet.pcm, &[0x34, 0x12]);
+    }
+
+    #[test]
+    fn rejects_malformed_audio_packets() {
+        assert_eq!(AudioPacket::parse(b"VXL"), Err(PacketError::TooShort));
+        assert_eq!(AudioPacket::parse(b"NOPE\0\0\0\0\0\0\xBB\x80\0\0"), Err(PacketError::InvalidMagic));
+        assert_eq!(AudioPacket::parse(b"VXL1\0\0\0\0\0\0\xBB\x80"), Err(PacketError::EmptyPayload));
+        assert_eq!(AudioPacket::parse(b"VXL1\0\0\0\0\0\0\xBB\x80\0"), Err(PacketError::MisalignedPcm));
+        assert_eq!(AudioPacket::parse(b"VXL1\0\0\0\0\0\0\0\0\0\0"), Err(PacketError::UnsupportedSampleRate));
+    }
+}
