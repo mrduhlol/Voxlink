@@ -10,7 +10,7 @@ name = "voxlink_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 crossbeam-channel = "0.5"
@@ -18,7 +18,7 @@ if-addrs = "0.15"
 libpulse-binding = "2.30"
 libpulse-simple-binding = "2.29"
 serde = { version = "1", features = ["derive"] }
-tauri = "2.12"
+tauri = { version = "2.12", features = [] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 voxlink-receiver = { path = "../../receiver" }
