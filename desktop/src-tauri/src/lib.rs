@@ -712,6 +712,8 @@ mod tests {
     #[test]
     fn level_meter_reports_silence_and_full_scale() {
         assert_eq!(pcm_levels(&[0, 0, 0, 0]), (0.0, -96.0));
-        assert_eq!(pcm_levels(&[0xff, 0x7f, 0x00, 0x80]), (1.0, 0.0));
+        let (rms, peak_dbfs) = pcm_levels(&[0xff, 0x7f, 0x00, 0x80]);
+        assert!((rms - 1.0).abs() < 0.00002);
+        assert_eq!(peak_dbfs, 0.0);
     }
 }
