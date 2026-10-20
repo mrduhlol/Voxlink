@@ -1,0 +1,8 @@
+[package]
+name = "voxlink-receiver"
+version = "0.1.0"
+edition = "2021"
+description = "Receive Voxlink UDP audio packets and save them as a WAV file"
+
+[dependencies]
+ctrlc = "3.4"
