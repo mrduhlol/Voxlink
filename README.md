@@ -1,36 +1,68 @@
-# Voxlink v0.1
+# Voxlink
 
-Voxlink is a small Android-to-Linux audio streaming prototype. The Android app captures mono PCM audio and sends UDP datagrams over the local network. The Rust receiver writes the packets to a WAV file.
+Voxlink streams mono microphone audio from Android to Linux over a trusted local Wi-Fi network. The Omarchy desktop app routes the live stream into a PipeWire/PulseAudio virtual microphone, and the standalone Rust receiver can save it to a WAV file.
 
 ## Downloads
 
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk"><img alt="Download Android APK" src="https://img.shields.io/badge/Download-Android_APK-3DDC84?logo=android&logoColor=white"></a>
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz"><img alt="Download Linux receiver" src="https://img.shields.io/badge/Download-Linux_x86__64-0078D4?logo=linux&logoColor=white"></a>
 
-These links become active after the first versioned release is published. Pushing a `v*` tag builds both files and attaches them to a GitHub release. The Android download is a debug APK; Android may ask you to allow installation from your browser or file manager.
+The Android download is a debug APK; Android may ask you to allow installation from your browser or file manager. The Linux archive is the standalone WAV receiver. The Tauri desktop app currently builds from source using the instructions below; no desktop AppImage is attached to a release yet.
 
-## Requirements
+## Omarchy desktop microphone
 
-- Android phone and Linux computer on the same trusted Wi-Fi network.
-- Android Studio with Android SDK 35 and JDK 17 to build the app.
-- Rust and Cargo to build the receiver.
+The Tauri desktop app creates a temporary **Voxlink Microphone** PipeWire/PulseAudio input and routes live Android audio into it. Start Voxlink, then select the input in Discord, OBS, a browser, or another recording application. It displays the actual phone connection state, input level, sample rate, packet loss, and audio routing errors.
 
-## Build and run the Linux receiver
+See [Omarchy desktop setup, build, launch, and troubleshooting](docs/omarchy-desktop.md) for prerequisites and complete instructions. The original standalone WAV receiver and Android sender instructions are below.
 
-From the repository root:
+## Install and run on Linux
+
+The Linux program is the receiver. It runs on your Linux computer and saves incoming audio as a WAV file; the Android app sends audio to it. Both devices must be connected to the same trusted Wi-Fi network. The prebuilt receiver download is for 64-bit x86 Linux (`x86_64`).
+
+### Install the prebuilt receiver
+
+1. Download the [latest Linux receiver archive](https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz). If there is no published versioned release yet, use the source-build instructions below.
+2. Extract it and make the program executable:
+
+   ```sh
+   tar -xzf voxlink-receiver-linux-x86_64.tar.gz
+   chmod +x voxlink-receiver
+   ```
+
+3. Find your computer's Wi-Fi IP address:
+
+   ```sh
+   ip -brief address
+   ```
+
+   Look for the `inet` address on your Wi-Fi interface (often named `wlan0` or `wlp...`). Use that address in place of `192.168.1.20` below.
+
+4. Start the receiver, replacing the example address with your own:
+
+   ```sh
+   mkdir -p recordings
+   ./voxlink-receiver --bind 192.168.1.20 --port 4950 --output recordings/received-audio.wav
+   ```
+
+The receiver listens on the chosen Wi-Fi address and UDP port `4950`. If your Linux firewall blocks incoming UDP, allow port `4950` on your trusted home network. Start the receiver before the phone sender. Press `Ctrl+C` after recording to finalize the WAV file.
+
+### Build the receiver from source
+
+Install Rust and Cargo using [rustup](https://rustup.rs/), then run these commands from the repository root:
 
 ```sh
-cargo build --release --manifest-path receiver/Cargo.toml
-ip -brief address
+cargo build --release --locked --manifest-path receiver/Cargo.toml
 mkdir -p recordings
-./receiver/target/release/voxlink-receiver --bind <PC_WIFI_IP> --port 4950 --output recordings/received-audio.wav
+./receiver/target/release/voxlink-receiver --bind 192.168.1.20 --port 4950 --output recordings/received-audio.wav
 ```
 
-Use the PC's Wi-Fi address for `--bind`. The receiver requires an explicit bind address so it does not silently listen on every interface. Keep the port reachable only from your trusted local network. Press `Ctrl+C` to stop and finalize the WAV file.
+Replace `192.168.1.20` with the Linux computer's Wi-Fi IP address, found with `ip -brief address`.
 
-## Build and run the Android sender
+## Install and run the Android sender
 
-Open the `android/` directory in Android Studio and let Gradle sync. Build and install the `app` module, or use Android Studio's Run action with a connected phone. On the phone, enter the PC Wi-Fi IP and port `4950`, tap **Start**, grant microphone permission, speak into the phone, then tap **Stop**.
+Download the [Android APK](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk) on your phone and open it to install. Android may ask you to allow installation from the browser or file manager you used to download the APK. Then enter the Linux computer's Wi-Fi IP address in the app, use port `4950`, tap **Start**, grant microphone permission, speak into the phone, and tap **Stop** when finished.
+
+To build the app yourself, open the `android/` directory in Android Studio with Android SDK 35 and JDK 17, let Gradle sync, and build or run the `app` module on a connected phone.
 
 The sender tries 48 kHz mono PCM and falls back to 44.1 kHz if the device cannot initialize 48 kHz capture. Keep the app in the foreground while recording in this prototype.
 
