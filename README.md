@@ -2,6 +2,13 @@
 
 Voxlink is a small Android-to-Linux audio streaming prototype. The Android app captures mono PCM audio and sends UDP datagrams over the local network. The Rust receiver writes the packets to a WAV file.
 
+## Downloads
+
+<a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk"><img alt="Download Android APK" src="https://img.shields.io/badge/Download-Android_APK-3DDC84?logo=android&logoColor=white"></a>
+<a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz"><img alt="Download Linux receiver" src="https://img.shields.io/badge/Download-Linux_x86__64-0078D4?logo=linux&logoColor=white"></a>
+
+These links become active after the first versioned release is published. Pushing a `v*` tag builds both files and attaches them to a GitHub release. The Android download is a debug APK; Android may ask you to allow installation from your browser or file manager.
+
 ## Requirements
 
 - Android phone and Linux computer on the same trusted Wi-Fi network.
