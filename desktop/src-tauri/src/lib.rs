@@ -604,8 +604,6 @@ fn receive_audio(
                     shared.view.packets_received += 1;
                     shared.view.input_level = rms;
                     shared.view.input_peak_dbfs = Some(peak);
-                    shared.view.error = None;
-                    shared.view.recovery = None;
                     shared.last_packet_at = Some(Instant::now());
                 }
                 ever_connected = true;
