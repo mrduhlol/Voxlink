@@ -19,7 +19,7 @@ struct Options {
 }
 
 fn usage() -> &'static str {
-    "Usage: voxlink-receiver --bind <IP:PORT> [--port PORT] [--output FILE]\n\
+    "Usage: voxlink-receiver --bind <PC_WIFI_IP> [--port PORT] [--output FILE]\n\
      Example: voxlink-receiver --bind 192.168.1.20 --port 4950 --output recordings/received-audio.wav"
 }
 
