@@ -1,0 +1,105 @@
+name: Build downloads
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Build Linux receiver
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build receiver
+        run: cargo build --release --locked --manifest-path receiver/Cargo.toml
+
+      - name: Package receiver
+        run: |
+          mkdir -p dist
+          tar -czf dist/voxlink-receiver-linux-x86_64.tar.gz \
+            -C receiver/target/release voxlink-receiver
+
+      - name: Upload Linux download
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxlink-receiver-linux-x86_64
+          path: dist/voxlink-receiver-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        run: gradle --no-daemon -p android :app:assembleDebug
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/Voxlink-android-debug.apk
+
+      - name: Upload Android download
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxlink-android
+          path: dist/Voxlink-android-debug.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish release assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - linux
+      - android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux receiver
+        uses: actions/download-artifact@v4
+        with:
+          name: voxlink-receiver-linux-x86_64
+          path: dist
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: voxlink-android
+          path: dist
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Voxlink-android-debug.apk
+            dist/voxlink-receiver-linux-x86_64.tar.gz
+          generate_release_notes: true
