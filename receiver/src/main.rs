@@ -8,9 +8,7 @@ use std::sync::{
     Arc,
 };
 use std::time::Duration;
-
-const MAGIC: &[u8; 4] = b"VXL1";
-const HEADER_LEN: usize = 12;
+use voxlink_receiver::AudioPacket;
 const MAX_WAV_DATA: u64 = u32::MAX as u64 - 36;
 
 struct Options {
@@ -109,20 +107,15 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             Err(error) => return Err(error.into()),
         };
 
-        if length <= HEADER_LEN
-            || &buffer[..4] != MAGIC
-            || (length - HEADER_LEN) % 2 != 0
-        {
-            malformed_packets += 1;
-            continue;
-        }
-
-        let sequence = u32::from_be_bytes(buffer[4..8].try_into()?);
-        let packet_rate = u32::from_be_bytes(buffer[8..12].try_into()?);
-        if !(8_000..=192_000).contains(&packet_rate) {
-            malformed_packets += 1;
-            continue;
-        }
+        let packet = match AudioPacket::parse(&buffer[..length]) {
+            Ok(packet) => packet,
+            Err(_) => {
+                malformed_packets += 1;
+                continue;
+            }
+        };
+        let sequence = packet.sequence;
+        let packet_rate = packet.sample_rate;
 
         if let Some(rate) = sample_rate {
             if packet_rate != rate {
@@ -155,7 +148,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         }
         expected_sequence = Some(sequence.wrapping_add(1));
 
-        let payload = &buffer[HEADER_LEN..length];
+        let payload = packet.pcm;
         let next_len = data_bytes + payload.len() as u64;
         if next_len > MAX_WAV_DATA {
             eprintln!("WAV size limit reached; stopping recording.");
