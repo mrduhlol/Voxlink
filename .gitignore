@@ -7,6 +7,12 @@ local.properties
 
 # Rust
 target/
+desktop/src-tauri/target/
+
+# Desktop frontend
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/gen/
 
 # Local recordings and generated packages
 recordings/*
