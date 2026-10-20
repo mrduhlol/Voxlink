@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core window access for the local Voxlink desktop interface.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
