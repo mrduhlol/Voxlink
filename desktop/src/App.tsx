@@ -197,7 +197,7 @@ function App() {
         <section className="panel stream-panel">
           <div className="panel-heading"><div><span className="eyebrow">03 / STREAM</span><h2>Audio diagnostics</h2></div><span className="stream-format">PCM16 <b>·</b> MONO</span></div>
           <div className="diagnostic-grid">
-            <div className="diagnostic"><span>Sample rate</span><strong>{status.sampleRate ? `${prettyNumber(status.sampleRate)} <i>Hz</i>` : "—"}</strong></div>
+            <div className="diagnostic"><span>Sample rate</span><strong>{status.sampleRate ? <>{prettyNumber(status.sampleRate)} <i>Hz</i></> : "—"}</strong></div>
             <div className="diagnostic"><span>Packets received</span><strong>{prettyNumber(status.packetsReceived)}</strong></div>
             <div className="diagnostic"><span>Packets lost</span><strong className={status.packetsLost ? "warning-value" : ""}>{prettyNumber(status.packetsLost)}</strong></div>
             <div className="diagnostic"><span>Last audio packet</span><strong>{lastPacket}</strong></div>
