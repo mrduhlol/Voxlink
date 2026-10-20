@@ -1,0 +1,16 @@
+# Android/Gradle
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+
+# Rust
+target/
+
+# Local recordings and generated packages
+recordings/*
+!recordings/.gitkeep
+*.wav
+*.apk
+*.aab
