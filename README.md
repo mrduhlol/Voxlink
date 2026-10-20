@@ -7,6 +7,8 @@ Voxlink streams mono microphone audio from Android to Linux over a trusted local
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk"><img alt="Download Android APK" src="https://img.shields.io/badge/Download-Android_APK-3DDC84?logo=android&logoColor=white"></a>
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz"><img alt="Download Linux receiver" src="https://img.shields.io/badge/Download-Linux_x86__64-0078D4?logo=linux&logoColor=white"></a>
 
+Text link: [Voxlink installation guide](docs/installation-guide.md) — step-by-step setup for Android phones, Windows, Linux, and Omarchy.
+
 The Android download is a debug APK; Android may ask you to allow installation from your browser or file manager. The Linux archive is the standalone WAV receiver. The Tauri desktop app currently builds from source using the instructions below; no desktop AppImage is attached to a release yet.
 
 ## Omarchy desktop microphone
