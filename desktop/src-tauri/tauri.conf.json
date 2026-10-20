@@ -27,7 +27,7 @@
   "bundle": {
     "active": true,
     "targets": ["appimage"],
-    "category": "AudioVideo",
+    "category": "Utility",
     "shortDescription": "Android phone audio as a Linux microphone",
     "longDescription": "A local Wi-Fi audio bridge that exposes Android microphone audio as a PipeWire/PulseAudio input source.",
     "icon": ["icons/icon.png"]
