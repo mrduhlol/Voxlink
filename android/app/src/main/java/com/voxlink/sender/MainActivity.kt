@@ -42,226 +42,190 @@ class MainActivity : Activity() {
         buildControls()
     }
 
+    private val pageColor = Color.rgb(16, 19, 17)
+    private val panelColor = Color.rgb(23, 27, 24)
+    private val lineColor = Color.rgb(42, 49, 44)
+    private val limeColor = Color.rgb(194, 240, 106)
+    private val brightColor = Color.rgb(238, 240, 235)
+    private val mutedColor = Color.rgb(151, 163, 154)
+    private lateinit var sessionTitle: TextView
+    private lateinit var formatText: TextView
+    private lateinit var levelMeter: android.widget.ProgressBar
+    private lateinit var levelText: TextView
+
+    private fun label(value: String, size: Float = 13f, color: Int = mutedColor,
+                      bold: Boolean = false, mono: Boolean = false): TextView = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        typeface = if (mono) Typeface.MONOSPACE else Typeface.create("sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
+        if (bold) setTypeface(typeface, Typeface.BOLD)
+    }
+
+    private fun column(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    private fun row(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    private fun card(): LinearLayout = column().apply {
+        setPadding(dp(18), dp(19), dp(18), dp(19))
+        background = rounded(panelColor, lineColor, dp(18), dp(1))
+    }
+    private fun space(parent: LinearLayout, height: Int) {
+        parent.addView(android.view.View(this), LinearLayout.LayoutParams(1, dp(height)))
+    }
+    private fun section(parent: LinearLayout, number: String, title: String) {
+        parent.addView(label("$number / $title", 10f, mutedColor, mono = true).apply { letterSpacing = 0.12f })
+        space(parent, 14)
+    }
+
     private fun buildControls() {
-        val ink = Color.rgb(22, 31, 48)
-        val muted = Color.rgb(119, 132, 153)
-        val blue = Color.rgb(48, 112, 239)
-        val page = Color.rgb(242, 245, 250)
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(22), dp(22), dp(28))
-            setBackgroundColor(page)
+        window.statusBarColor = pageColor
+        window.navigationBarColor = pageColor
+        window.decorView.systemUiVisibility = 0
+        val content = column().apply {
+            setPadding(dp(22), dp(20), dp(22), dp(26))
+            setBackgroundColor(pageColor)
         }
-
-        val brandRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val brandMark = TextView(this).apply {
-            text = "V"
-            textSize = 17f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setTypeface(typeface, Typeface.BOLD)
-            background = rounded(blue, blue, dp(14), 0)
-        }
-        brandRow.addView(brandMark, LinearLayout.LayoutParams(dp(38), dp(38)))
-        brandRow.addView(TextView(this).apply {
-            text = "VOXLINK"
-            textSize = 13f
-            letterSpacing = 0.14f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(11), 0, 0, 0)
+        val header = row()
+        header.addView(android.widget.ImageView(this).apply {
+            setImageResource(com.voxlink.sender.R.drawable.voxlink_icon)
+            contentDescription = "Voxlink waveform logo"
+        }, LinearLayout.LayoutParams(dp(42), dp(42)))
+        val name = column().apply { setPadding(dp(10), 0, 0, 0) }
+        name.addView(label("voxlink", 20f, brightColor, bold = true))
+        name.addView(label("PHONE AUDIO · LINUX", 8f, mutedColor, mono = true).apply { letterSpacing = 0.12f })
+        header.addView(name, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(label("● LOCAL", 10f, limeColor, mono = true).apply {
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = rounded(panelColor, lineColor, dp(7), dp(1))
         })
-        content.addView(brandRow)
-
-        content.addView(TextView(this).apply {
-            text = "Your mic,\nwithout the wires."
-            textSize = 31f
-            setLineSpacing(dp(1).toFloat(), 1f)
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(25), 0, dp(8))
-        })
-        content.addView(TextView(this).apply {
-            text = "Turn your Android phone into a wireless microphone for your computer."
-            textSize = 15f
-            setTextColor(muted)
+        content.addView(header)
+        space(content, 28)
+        content.addView(label("WIRELESS AUDIO BRIDGE", 10f, mutedColor, mono = true).apply { letterSpacing = 0.12f })
+        space(content, 10)
+        content.addView(label("Your phone,", 34f, brightColor, bold = true))
+        content.addView(label("a studio microphone.", 30f, limeColor, bold = true))
+        space(content, 9)
+        content.addView(label("Stream your voice straight to your Linux computer over Wi-Fi.", 14f).apply {
             setLineSpacing(dp(3).toFloat(), 1f)
-            setPadding(0, 0, 0, dp(20))
         })
+        space(content, 22)
 
-        val liveCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(19), dp(18), dp(19), dp(18))
-            background = rounded(Color.rgb(20, 30, 49), Color.rgb(20, 30, 49), dp(21), 0)
+        val monitor = card()
+        val monitorHeader = row()
+        monitorHeader.addView(label("01 / AUDIO MONITOR", 10f, mutedColor, mono = true), LinearLayout.LayoutParams(0, -2, 1f))
+        liveBadge = label("● STANDBY", 10f, mutedColor, mono = true)
+        monitorHeader.addView(liveBadge)
+        monitor.addView(monitorHeader)
+        space(monitor, 19)
+        sessionTitle = label("Ready to go live", 23f, brightColor, bold = true)
+        monitor.addView(sessionTitle)
+        space(monitor, 6)
+        formatText = label("PCM16  /  MONO  /  UDP", 10f, mutedColor, mono = true)
+        monitor.addView(formatText)
+        space(monitor, 24)
+        val meterHeader = row()
+        meterHeader.addView(label("MIC INPUT LEVEL", 9f, mutedColor, mono = true), LinearLayout.LayoutParams(0, -2, 1f))
+        levelText = label("— dBFS", 10f, mutedColor, mono = true)
+        meterHeader.addView(levelText)
+        monitor.addView(meterHeader)
+        space(monitor, 10)
+        levelMeter = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(limeColor)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(lineColor)
+            contentDescription = "Microphone input level"
         }
-        val liveHeader = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        liveHeader.addView(TextView(this).apply {
-            text = "LIVE AUDIO LINK"
-            textSize = 11f
-            letterSpacing = 0.11f
-            setTextColor(Color.rgb(173, 188, 212))
-            setTypeface(typeface, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        liveBadge = TextView(this).apply {
-            text = "●  READY"
-            textSize = 10f
-            letterSpacing = 0.05f
-            setTextColor(Color.rgb(139, 222, 185))
-            setPadding(dp(10), dp(7), dp(10), dp(7))
-            background = rounded(Color.rgb(34, 61, 65), Color.rgb(34, 61, 65), dp(20), 0)
-        }
-        liveHeader.addView(liveBadge)
-        liveCard.addView(liveHeader)
-        liveCard.addView(TextView(this).apply {
-            text = "Connect to your computer"
-            textSize = 19f
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(18), 0, dp(4))
-        })
-        liveCard.addView(TextView(this).apply {
-            text = "48 kHz  ·  Mono  ·  Wi-Fi"
-            textSize = 13f
-            setTextColor(Color.rgb(173, 188, 212))
-        })
-        content.addView(liveCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+        monitor.addView(levelMeter, LinearLayout.LayoutParams(-1, dp(10)))
+        space(monitor, 7)
+        monitor.addView(label("−60                 −30                 0 dB", 9f, mutedColor, mono = true))
+        space(monitor, 17)
+        val statusRow = row()
+        statusDot = label("●", 11f, mutedColor).apply { setPadding(0, 0, dp(9), 0) }
+        statusRow.addView(statusDot)
+        statusText = label("Start the receiver on your computer first.", 12f)
+        statusRow.addView(statusText, LinearLayout.LayoutParams(0, -2, 1f))
+        monitor.addView(statusRow)
+        content.addView(monitor)
+        space(content, 14)
 
-        val connectionCard = card()
-        connectionCard.addView(TextView(this).apply {
-            text = "Connection setup"
-            textSize = 18f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        connectionCard.addView(TextView(this).apply {
-            text = "Enter the address shown by the Voxlink receiver."
-            textSize = 13f
-            setTextColor(muted)
-            setPadding(0, dp(5), 0, dp(16))
-        })
-        connectionCard.addView(fieldLabel("COMPUTER IP ADDRESS"))
-
-        addressInput = EditText(this).apply {
-            hint = "Computer IP address"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setSingleLine(true)
-            textSize = 16f
-            setTextColor(ink)
-            setHintTextColor(Color.rgb(154, 164, 180))
-            setPadding(dp(15), 0, dp(15), 0)
-            background = rounded(Color.rgb(247, 249, 252), Color.rgb(229, 233, 240), dp(13), dp(1))
-        }
-        connectionCard.addView(addressInput, LinearLayout.LayoutParams(-1, dp(54)).apply {
-            topMargin = dp(8)
-            bottomMargin = dp(16)
-        })
-
-        connectionCard.addView(fieldLabel("UDP PORT"))
-
-        portInput = EditText(this).apply {
-            setText("4950")
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setSingleLine(true)
-            textSize = 16f
-            setTextColor(ink)
-            setPadding(dp(15), 0, dp(15), 0)
-            background = rounded(Color.rgb(247, 249, 252), Color.rgb(229, 233, 240), dp(13), dp(1))
-        }
-        connectionCard.addView(portInput, LinearLayout.LayoutParams(-1, dp(54)).apply {
-            topMargin = dp(8)
-        })
-        content.addView(connectionCard)
-
-        val statusCard = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(15), dp(13), dp(15), dp(13))
-            background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(15), dp(1))
-        }
-        statusDot = TextView(this).apply {
-            text = "●"
-            textSize = 16f
-            setTextColor(Color.rgb(130, 142, 160))
-            setPadding(0, 0, dp(11), 0)
-        }
-        statusCard.addView(statusDot)
-        statusText = TextView(this).apply {
-            text = "Ready when you are"
-            textSize = 14f
-            setTextColor(Color.rgb(69, 81, 101))
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        statusCard.addView(statusText, LinearLayout.LayoutParams(0, -2, 1f))
-        val statusParams = LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = dp(14)
-        }
-        content.addView(statusCard, statusParams)
-
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
+        val connection = card()
+        section(connection, "02", "CONNECTION")
+        connection.addView(label("Where should your audio go?", 18f, brightColor, bold = true))
+        space(connection, 6)
+        connection.addView(label("Use the PC Wi-Fi address from the desktop app.", 12f))
+        space(connection, 18)
+        val saved = getPreferences(MODE_PRIVATE)
+        connection.addView(label("COMPUTER IP ADDRESS", 10f, mutedColor, mono = true))
+        space(connection, 8)
+        addressInput = input(saved.getString("host", "") ?: "", "e.g. 192.168.1.7", false)
+        addressInput.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_NEXT
+        connection.addView(addressInput, LinearLayout.LayoutParams(-1, dp(54)))
+        space(connection, 16)
+        connection.addView(label("UDP PORT", 10f, mutedColor, mono = true))
+        space(connection, 8)
+        portInput = input(saved.getString("port", "4950") ?: "4950", "4950", true)
+        portInput.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        connection.addView(portInput, LinearLayout.LayoutParams(-1, dp(54)))
+        space(connection, 10)
+        connection.addView(label("Both devices must be on the same Wi-Fi network.", 11f))
+        space(connection, 20)
+        val actions = row()
         startButton = Button(this).apply {
-            text = "Start sending"
+            text = "Start streaming  →"
             isAllCaps = false
-            textSize = 15f
-            setTextColor(Color.WHITE)
+            textSize = 14f
+            setTextColor(pageColor)
             setTypeface(typeface, Typeface.BOLD)
-            background = rounded(blue, blue, dp(15), 0)
+            background = rounded(limeColor, limeColor, dp(12), 0)
             setOnClickListener { requestStart() }
         }
-        actions.addView(startButton, LinearLayout.LayoutParams(0, dp(54), 1f).apply {
-            marginEnd = dp(8)
-        })
+        actions.addView(startButton, LinearLayout.LayoutParams(0, dp(54), 1f).apply { marginEnd = dp(10) })
         stopButton = Button(this).apply {
             text = "Stop"
             isAllCaps = false
-            textSize = 15f
-            setTextColor(Color.rgb(65, 78, 99))
-            background = rounded(Color.rgb(231, 235, 242), Color.rgb(231, 235, 242), dp(15), 0)
+            textSize = 14f
+            setTextColor(brightColor)
+            background = rounded(lineColor, lineColor, dp(12), 0)
             isEnabled = false
-            alpha = 0.55f
+            alpha = 0.45f
             setOnClickListener { stopRecording() }
         }
-        actions.addView(stopButton, LinearLayout.LayoutParams(dp(100), dp(54)))
-        content.addView(actions, LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = dp(14)
-        })
-
-        content.addView(TextView(this).apply {
-            text = "Start the Voxlink receiver on your computer first. Keep this app open while sending."
-            textSize = 13f
-            setTextColor(muted)
+        actions.addView(stopButton, LinearLayout.LayoutParams(dp(80), dp(54)))
+        connection.addView(actions)
+        content.addView(connection)
+        space(content, 19)
+        content.addView(label("● Audio stays on your local network.", 11f, mutedColor).apply { gravity = Gravity.CENTER })
+        space(content, 7)
+        content.addView(label("KEEP VOXLINK OPEN WHILE STREAMING", 8f, mutedColor, mono = true).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(8), dp(20), dp(8), 0)
+            letterSpacing = 0.08f
         })
-
-        val scroll = ScrollView(this).apply {
+        setContentView(ScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(page)
+            setBackgroundColor(pageColor)
+            clipToPadding = false
             addView(content)
-        }
-        setContentView(scroll)
+            setOnApplyWindowInsetsListener { view, insets ->
+                view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+                insets.consumeSystemWindowInsets()
+            }
+        })
     }
 
-    private fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(18), dp(19), dp(18), dp(18))
-        background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(19), dp(1))
-    }
-
-    private fun fieldLabel(label: String): TextView = TextView(this).apply {
-        text = label
-        textSize = 11f
-        letterSpacing = 0.07f
-        setTextColor(Color.rgb(113, 126, 147))
-        setTypeface(typeface, Typeface.BOLD)
+    private fun input(value: String, placeholder: String, numeric: Boolean): EditText = EditText(this).apply {
+        setText(value)
+        hint = placeholder
+        inputType = if (numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        setSingleLine(true)
+        textSize = 15f
+        typeface = Typeface.MONOSPACE
+        setTextColor(brightColor)
+        setHintTextColor(mutedColor)
+        setPadding(dp(14), 0, dp(14), 0)
+        background = rounded(pageColor, lineColor, dp(10), dp(1))
     }
 
     private fun rounded(fill: Int, stroke: Int, radius: Int, strokeWidth: Int): GradientDrawable =
@@ -308,6 +272,9 @@ class MainActivity : Activity() {
 
     private fun startRecording(address: String, port: Int) {
         if (running) return
+        getPreferences(MODE_PRIVATE).edit().putString("host", address).putString("port", port.toString()).apply()
+        addressInput.isEnabled = false
+        portInput.isEnabled = false
         running = true
         startButton.isEnabled = false
         startButton.alpha = 0.55f
@@ -337,6 +304,8 @@ class MainActivity : Activity() {
 
             val sampleRate = recorder.sampleRate
             val samples = ShortArray(PACKET_SAMPLES)
+            runOnUiThread { formatText.text = "${sampleRate / 1000f} kHz  /  MONO  /  PCM16" }
+            var lastMeterUpdate = 0L
             var sequence = 0
             while (running) {
                 val count = recorder.read(samples, 0, samples.size, AudioRecord.READ_BLOCKING)
@@ -346,6 +315,19 @@ class MainActivity : Activity() {
                 }
                 if (count == 0) continue
 
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastMeterUpdate >= 80) {
+                    lastMeterUpdate = now
+                    var peak = 0
+                    for (index in 0 until count) peak = maxOf(peak, kotlin.math.abs(samples[index].toInt()))
+                    val db = if (peak == 0) -60.0 else maxOf(-60.0, 20 * kotlin.math.log10(peak / 32768.0))
+                    runOnUiThread {
+                        if (running) {
+                            levelMeter.progress = ((db + 60) / 60 * 100).toInt()
+                            levelText.text = "${db.toInt()} dBFS"
+                        }
+                    }
+                }
                 val packetBytes = ByteArray(HEADER_SIZE + count * 2)
                 packetBytes[0] = 'V'.code.toByte()
                 packetBytes[1] = 'X'.code.toByte()
@@ -374,6 +356,8 @@ class MainActivity : Activity() {
             recorder?.release()
             socket?.close()
             runOnUiThread {
+                addressInput.isEnabled = true
+                portInput.isEnabled = true
                 startButton.isEnabled = true
                 startButton.alpha = 1f
                 stopButton.isEnabled = false
@@ -426,14 +410,14 @@ class MainActivity : Activity() {
         statusText.text = message
         statusDot.setTextColor(color)
         val active = running && message.startsWith("Sending")
-        liveBadge.text = if (active) "●  LIVE" else "●  READY"
-        liveBadge.setTextColor(if (active) Color.rgb(142, 236, 187) else Color.rgb(173, 205, 255))
-        liveBadge.background = rounded(
-            if (active) Color.rgb(31, 77, 64) else Color.rgb(34, 61, 65),
-            if (active) Color.rgb(31, 77, 64) else Color.rgb(34, 61, 65),
-            dp(20),
-            0
-        )
+        val error = message.startsWith("Error") || message.contains("denied") || message.startsWith("Enter")
+        liveBadge.text = when { active -> "● SENDING"; error -> "● ERROR"; running -> "● STARTING"; else -> "● STANDBY" }
+        liveBadge.setTextColor(if (error) Color.rgb(255, 119, 113) else if (running) limeColor else mutedColor)
+        sessionTitle.text = when { active -> "You're on air"; error -> "Check your connection"; running -> "Opening microphone…"; else -> "Ready to go live" }
+        if (!running) {
+            levelMeter.progress = 0
+            levelText.text = "— dBFS"
+        }
     }
 
     private fun stopRecording() {
