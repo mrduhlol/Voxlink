@@ -3,16 +3,19 @@ package com.voxlink.sender
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import java.io.IOException
 import java.net.DatagramPacket
@@ -23,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var addressInput: EditText
     private lateinit var portInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var statusDot: TextView
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
 
@@ -38,61 +42,171 @@ class MainActivity : Activity() {
     }
 
     private fun buildControls() {
-        val root = LinearLayout(this).apply {
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
+            setPadding(dp(24), dp(28), dp(24), dp(28))
+            setBackgroundColor(Color.rgb(245, 247, 251))
         }
 
-        root.addView(TextView(this).apply {
-            text = "Voxlink audio sender"
-            textSize = 22f
+        content.addView(TextView(this).apply {
+            text = "VOXLINK"
+            textSize = 13f
+            letterSpacing = 0.16f
+            setTextColor(Color.rgb(33, 103, 220))
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        content.addView(TextView(this).apply {
+            text = "Wireless microphone"
+            textSize = 28f
+            setTextColor(Color.rgb(24, 32, 48))
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(8), 0, dp(4))
+        })
+        content.addView(TextView(this).apply {
+            text = "Send your phone's mic audio to your Linux computer over Wi-Fi."
+            textSize = 15f
+            setTextColor(Color.rgb(99, 111, 130))
+            setPadding(0, 0, 0, dp(24))
+        })
+
+        val connectionCard = card()
+        connectionCard.addView(TextView(this).apply {
+            text = "COMPUTER"
+            textSize = 12f
+            letterSpacing = 0.08f
+            setTextColor(Color.rgb(105, 117, 137))
+            setTypeface(typeface, Typeface.BOLD)
         })
 
         addressInput = EditText(this).apply {
-            hint = "PC Wi-Fi IP address"
+            hint = "Computer IP address"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setSingleLine(true)
+            textSize = 16f
+            setTextColor(Color.rgb(24, 32, 48))
+            setHintTextColor(Color.rgb(145, 154, 170))
+            setPadding(dp(14), 0, dp(14), 0)
+            background = rounded(Color.WHITE, Color.rgb(220, 226, 235), dp(12), dp(1))
         }
-        root.addView(addressInput, matchWidth())
+        connectionCard.addView(addressInput, LinearLayout.LayoutParams(-1, dp(54)).apply {
+            topMargin = dp(8)
+            bottomMargin = dp(18)
+        })
+
+        connectionCard.addView(TextView(this).apply {
+            text = "UDP PORT"
+            textSize = 12f
+            letterSpacing = 0.08f
+            setTextColor(Color.rgb(105, 117, 137))
+            setTypeface(typeface, Typeface.BOLD)
+        })
 
         portInput = EditText(this).apply {
-            hint = "UDP port"
             setText("4950")
             inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine(true)
+            textSize = 16f
+            setTextColor(Color.rgb(24, 32, 48))
+            setPadding(dp(14), 0, dp(14), 0)
+            background = rounded(Color.WHITE, Color.rgb(220, 226, 235), dp(12), dp(1))
         }
-        root.addView(portInput, matchWidth())
+        connectionCard.addView(portInput, LinearLayout.LayoutParams(-1, dp(54)).apply {
+            topMargin = dp(8)
+        })
+        content.addView(connectionCard)
 
+        val statusCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(15), dp(16), dp(15))
+            background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(16), dp(1))
+        }
+        statusDot = TextView(this).apply {
+            text = "●"
+            textSize = 16f
+            setTextColor(Color.rgb(130, 142, 160))
+            setPadding(0, 0, dp(12), 0)
+        }
+        statusCard.addView(statusDot)
+        statusText = TextView(this).apply {
+            text = "Ready to connect"
+            textSize = 14f
+            setTextColor(Color.rgb(69, 81, 101))
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        statusCard.addView(statusText, LinearLayout.LayoutParams(0, -2, 1f))
+        val statusParams = LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(16)
+        }
+        content.addView(statusCard, statusParams)
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         startButton = Button(this).apply {
-            text = "Start"
+            text = "Start sending"
+            isAllCaps = false
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(Color.rgb(38, 105, 224), Color.rgb(38, 105, 224), dp(14), 0)
             setOnClickListener { requestStart() }
         }
-        root.addView(startButton, matchWidth())
-
+        actions.addView(startButton, LinearLayout.LayoutParams(0, dp(54), 1f).apply {
+            marginEnd = dp(8)
+        })
         stopButton = Button(this).apply {
             text = "Stop"
+            isAllCaps = false
+            textSize = 15f
+            setTextColor(Color.rgb(65, 78, 99))
+            background = rounded(Color.rgb(231, 235, 242), Color.rgb(231, 235, 242), dp(14), 0)
             isEnabled = false
+            alpha = 0.55f
             setOnClickListener { stopRecording() }
         }
-        root.addView(stopButton, matchWidth())
+        actions.addView(stopButton, LinearLayout.LayoutParams(dp(100), dp(54)))
+        content.addView(actions, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(14)
+        })
 
-        statusText = TextView(this).apply {
-            text = "Enter the Linux PC's Wi-Fi IP and start the receiver first."
-            textSize = 16f
-            gravity = Gravity.START
+        content.addView(TextView(this).apply {
+            text = "Keep Voxlink open while sending. Start the receiver on your computer first."
+            textSize = 13f
+            setTextColor(Color.rgb(119, 130, 148))
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(20), dp(8), 0)
+        })
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.rgb(245, 247, 251))
+            addView(content)
         }
-        root.addView(statusText, matchWidth())
-        setContentView(root)
+        setContentView(scroll)
     }
 
-    private fun matchWidth(): LinearLayout.LayoutParams =
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    private fun card(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+        background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(18), dp(1))
+    }
+
+    private fun rounded(fill: Int, stroke: Int, radius: Int, strokeWidth: Int): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(fill)
+            cornerRadius = radius.toFloat()
+            if (strokeWidth > 0) setStroke(strokeWidth, stroke)
+        }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun requestStart() {
         val address = addressInput.text.toString().trim()
         val port = portInput.text.toString().trim().toIntOrNull()
         if (address.isEmpty() || port == null || port !in 1..65535) {
-            statusText.text = "Enter a valid PC IP address and UDP port."
+            setStatus("Enter a valid computer IP and UDP port.", Color.rgb(197, 116, 20))
             return
         }
 
@@ -115,7 +229,7 @@ class MainActivity : Activity() {
             val port = pendingPort
             if (address != null && port != null) startRecording(address, port)
         } else {
-            statusText.text = "Microphone permission was denied. Allow it to send audio."
+            setStatus("Microphone permission was denied.", Color.rgb(197, 72, 72))
         }
         pendingAddress = null
         pendingPort = null
@@ -125,8 +239,10 @@ class MainActivity : Activity() {
         if (running) return
         running = true
         startButton.isEnabled = false
+        startButton.alpha = 0.55f
         stopButton.isEnabled = true
-        statusText.text = "Connecting to $address:$port…"
+        stopButton.alpha = 1f
+        setStatus("Connecting to $address:$port…", Color.rgb(38, 105, 224))
 
         worker = Thread({ streamAudio(address, port) }, "voxlink-audio-sender")
         worker?.start()
@@ -188,8 +304,11 @@ class MainActivity : Activity() {
             socket?.close()
             runOnUiThread {
                 startButton.isEnabled = true
+                startButton.alpha = 1f
                 stopButton.isEnabled = false
-                statusText.text = failure?.let { "Error: $it" } ?: "Stopped."
+                stopButton.alpha = 0.55f
+                if (failure != null) setStatus("Error: $failure", Color.rgb(197, 72, 72))
+                else setStatus("Stopped", Color.rgb(119, 130, 148))
             }
         }
     }
@@ -229,7 +348,12 @@ class MainActivity : Activity() {
     }
 
     private fun showStatus(message: String) {
-        runOnUiThread { statusText.text = message }
+        runOnUiThread { setStatus(message, Color.rgb(38, 153, 105)) }
+    }
+
+    private fun setStatus(message: String, color: Int) {
+        statusText.text = message
+        statusDot.setTextColor(color)
     }
 
     private fun stopRecording() {
@@ -240,7 +364,7 @@ class MainActivity : Activity() {
         } catch (_: IllegalStateException) {
             // Capture may already have stopped after an audio error.
         }
-        statusText.text = "Stopping…"
+        setStatus("Stopping…", Color.rgb(197, 116, 20))
     }
 
     override fun onDestroy() {
