@@ -5,7 +5,9 @@
     <application
         android:allowBackup="false"
         android:label="Voxlink"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:icon="@drawable/voxlink_icon"
+        android:roundIcon="@drawable/voxlink_icon"
+        android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
