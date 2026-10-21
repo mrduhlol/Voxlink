@@ -1,4 +1,4 @@
-# Voxlink
+# Voxlink v0.2.0
 
 Voxlink streams mono microphone audio from Android to Linux over a trusted local Wi-Fi network. The Omarchy desktop app routes the live stream into a PipeWire/PulseAudio virtual microphone, and the standalone Rust receiver can save it to a WAV file.
 
@@ -6,14 +6,15 @@ Voxlink streams mono microphone audio from Android to Linux over a trusted local
 
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk"><img alt="Download Android APK" src="https://img.shields.io/badge/Download-Android_APK-3DDC84?logo=android&logoColor=white"></a>
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz"><img alt="Download Linux receiver" src="https://img.shields.io/badge/Download-Linux_x86__64-0078D4?logo=linux&logoColor=white"></a>
+<a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage"><img alt="Download Omarchy desktop app" src="https://img.shields.io/badge/Download-Omarchy_AppImage-8A2BE2?logo=linux&logoColor=white"></a>
 
 Text link: [Voxlink installation guide](docs/installation-guide.md) — step-by-step setup for Android phones, Windows, Linux, and Omarchy.
 
-The Android download is a debug APK; Android may ask you to allow installation from your browser or file manager. The Linux archive is the standalone WAV receiver. The Tauri desktop app currently builds from source using the instructions below; no desktop AppImage is attached to a release yet.
+The Android download is a debug APK; Android may ask you to allow installation from your browser or file manager. The Linux archive is the standalone WAV receiver. The Omarchy AppImage is the real-time desktop microphone app. On first launch, click **Add to app menu** to add Voxlink to your user app launcher without installing system packages or requiring administrator access.
 
 ## Omarchy desktop microphone
 
-The Tauri desktop app creates a temporary **Voxlink Microphone** PipeWire/PulseAudio input and routes live Android audio into it. Start Voxlink, then select the input in Discord, OBS, a browser, or another recording application. It displays the actual phone connection state, input level, sample rate, packet loss, and audio routing errors.
+The Tauri desktop app creates a temporary **Voxlink Microphone** PipeWire/PulseAudio input and routes live Android audio into it. Download and launch the [Omarchy desktop AppImage](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage); on first launch, choose **Add to app menu**. Then search for Voxlink from the app launcher, start listening, and select the input in Discord, OBS, a browser, or another recording application. It displays the actual phone connection state, input level, sample rate, packet loss, and audio routing errors.
 
 See [Omarchy desktop setup, build, launch, and troubleshooting](docs/omarchy-desktop.md) for prerequisites and complete instructions. The original standalone WAV receiver and Android sender instructions are below.
 
