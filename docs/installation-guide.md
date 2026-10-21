@@ -17,6 +17,22 @@ There is no iPhone app or Windows virtual-microphone app in this version. Keep t
 
 Voxlink requests microphone access because it captures audio locally on the phone and sends it to the configured computer. It does not upload the audio to a cloud service.
 
+### Android studio controls (current main build)
+
+The studio interface and controls are available in the Android APK artifact from the latest successful [Build downloads workflow](https://github.com/mrduhlol/Voxlink/actions/workflows/build-downloads.yml). Release APKs only include features present when that release was built.
+
+- **Mute microphone** sends silence while keeping the stream open. Tap again to unmute.
+- **Mic gain** adjusts outgoing audio from 0–200%. Start at 100%; high gain can clip loud sounds. The meter shows the outgoing level.
+- **Noise gate** silences audio blocks below the chosen input threshold. The minimum slider position turns it off. Raise it gently to avoid cutting off quiet speech.
+- **Sample rate** chooses 48 or 44.1 kHz before streaming. If the microphone cannot use that rate, Voxlink tries the other one; the monitor displays the actual rate.
+- **Keep screen awake** prevents the display sleeping while streaming. Leaving the app stops recording; background streaming is not supported.
+- **Connection tools** lists local IPv4 addresses by interface and lets you refresh or copy them. Use the Wi-Fi address in the desktop app's Phone IP field, avoiding VPN/mobile interfaces.
+- **Save this computer** stores the current destination and port. **Choose saved computer** restores one while stopped. Up to ten recent destinations are kept.
+- **Session statistics** shows elapsed time, packets, and network bytes sent, including packet headers. These counts do not confirm receiver delivery; check the desktop diagnostics for that.
+- **Setup & troubleshooting** provides connection instructions inside the app.
+
+Gain, gate, sample rate, screen-awake preference, and saved computers persist between launches. The last started destination and port are restored automatically.
+
 ## 2. Windows receiver (WAV recording)
 
 Windows can run the standalone WAV receiver built from source. This receives the phone stream and writes `recordings\received-audio.wav`; it does not create a virtual microphone for Windows applications.
