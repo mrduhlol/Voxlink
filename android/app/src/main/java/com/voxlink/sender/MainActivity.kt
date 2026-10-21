@@ -27,6 +27,7 @@ class MainActivity : Activity() {
     private lateinit var portInput: EditText
     private lateinit var statusText: TextView
     private lateinit var statusDot: TextView
+    private lateinit var liveBadge: TextView
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
 
@@ -42,73 +43,135 @@ class MainActivity : Activity() {
     }
 
     private fun buildControls() {
+        val ink = Color.rgb(22, 31, 48)
+        val muted = Color.rgb(119, 132, 153)
+        val blue = Color.rgb(48, 112, 239)
+        val page = Color.rgb(242, 245, 250)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(28), dp(24), dp(28))
-            setBackgroundColor(Color.rgb(245, 247, 251))
+            setPadding(dp(22), dp(22), dp(22), dp(28))
+            setBackgroundColor(page)
         }
 
-        content.addView(TextView(this).apply {
+        val brandRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val brandMark = TextView(this).apply {
+            text = "V"
+            textSize = 17f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(blue, blue, dp(14), 0)
+        }
+        brandRow.addView(brandMark, LinearLayout.LayoutParams(dp(38), dp(38)))
+        brandRow.addView(TextView(this).apply {
             text = "VOXLINK"
             textSize = 13f
-            letterSpacing = 0.16f
-            setTextColor(Color.rgb(33, 103, 220))
+            letterSpacing = 0.14f
+            setTextColor(ink)
             setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(11), 0, 0, 0)
+        })
+        content.addView(brandRow)
+
+        content.addView(TextView(this).apply {
+            text = "Your mic,\nwithout the wires."
+            textSize = 31f
+            setLineSpacing(dp(1).toFloat(), 1f)
+            setTextColor(ink)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(25), 0, dp(8))
         })
         content.addView(TextView(this).apply {
-            text = "Wireless microphone"
-            textSize = 28f
-            setTextColor(Color.rgb(24, 32, 48))
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(8), 0, dp(4))
-        })
-        content.addView(TextView(this).apply {
-            text = "Send your phone's mic audio to your Linux computer over Wi-Fi."
+            text = "Turn your Android phone into a wireless microphone for your computer."
             textSize = 15f
-            setTextColor(Color.rgb(99, 111, 130))
-            setPadding(0, 0, 0, dp(24))
+            setTextColor(muted)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, 0, 0, dp(20))
         })
+
+        val liveCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(19), dp(18), dp(19), dp(18))
+            background = rounded(Color.rgb(20, 30, 49), Color.rgb(20, 30, 49), dp(21), 0)
+        }
+        val liveHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        liveHeader.addView(TextView(this).apply {
+            text = "LIVE AUDIO LINK"
+            textSize = 11f
+            letterSpacing = 0.11f
+            setTextColor(Color.rgb(173, 188, 212))
+            setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        liveBadge = TextView(this).apply {
+            text = "●  READY"
+            textSize = 10f
+            letterSpacing = 0.05f
+            setTextColor(Color.rgb(139, 222, 185))
+            setPadding(dp(10), dp(7), dp(10), dp(7))
+            background = rounded(Color.rgb(34, 61, 65), Color.rgb(34, 61, 65), dp(20), 0)
+        }
+        liveHeader.addView(liveBadge)
+        liveCard.addView(liveHeader)
+        liveCard.addView(TextView(this).apply {
+            text = "Connect to your computer"
+            textSize = 19f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(18), 0, dp(4))
+        })
+        liveCard.addView(TextView(this).apply {
+            text = "48 kHz  ·  Mono  ·  Wi-Fi"
+            textSize = 13f
+            setTextColor(Color.rgb(173, 188, 212))
+        })
+        content.addView(liveCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
 
         val connectionCard = card()
         connectionCard.addView(TextView(this).apply {
-            text = "COMPUTER"
-            textSize = 12f
-            letterSpacing = 0.08f
-            setTextColor(Color.rgb(105, 117, 137))
+            text = "Connection setup"
+            textSize = 18f
+            setTextColor(ink)
             setTypeface(typeface, Typeface.BOLD)
         })
+        connectionCard.addView(TextView(this).apply {
+            text = "Enter the address shown by the Voxlink receiver."
+            textSize = 13f
+            setTextColor(muted)
+            setPadding(0, dp(5), 0, dp(16))
+        })
+        connectionCard.addView(fieldLabel("COMPUTER IP ADDRESS"))
 
         addressInput = EditText(this).apply {
             hint = "Computer IP address"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setSingleLine(true)
             textSize = 16f
-            setTextColor(Color.rgb(24, 32, 48))
-            setHintTextColor(Color.rgb(145, 154, 170))
-            setPadding(dp(14), 0, dp(14), 0)
-            background = rounded(Color.WHITE, Color.rgb(220, 226, 235), dp(12), dp(1))
+            setTextColor(ink)
+            setHintTextColor(Color.rgb(154, 164, 180))
+            setPadding(dp(15), 0, dp(15), 0)
+            background = rounded(Color.rgb(247, 249, 252), Color.rgb(229, 233, 240), dp(13), dp(1))
         }
         connectionCard.addView(addressInput, LinearLayout.LayoutParams(-1, dp(54)).apply {
             topMargin = dp(8)
-            bottomMargin = dp(18)
+            bottomMargin = dp(16)
         })
 
-        connectionCard.addView(TextView(this).apply {
-            text = "UDP PORT"
-            textSize = 12f
-            letterSpacing = 0.08f
-            setTextColor(Color.rgb(105, 117, 137))
-            setTypeface(typeface, Typeface.BOLD)
-        })
+        connectionCard.addView(fieldLabel("UDP PORT"))
 
         portInput = EditText(this).apply {
             setText("4950")
             inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine(true)
             textSize = 16f
-            setTextColor(Color.rgb(24, 32, 48))
-            setPadding(dp(14), 0, dp(14), 0)
-            background = rounded(Color.WHITE, Color.rgb(220, 226, 235), dp(12), dp(1))
+            setTextColor(ink)
+            setPadding(dp(15), 0, dp(15), 0)
+            background = rounded(Color.rgb(247, 249, 252), Color.rgb(229, 233, 240), dp(13), dp(1))
         }
         connectionCard.addView(portInput, LinearLayout.LayoutParams(-1, dp(54)).apply {
             topMargin = dp(8)
@@ -118,25 +181,25 @@ class MainActivity : Activity() {
         val statusCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(15), dp(16), dp(15))
-            background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(16), dp(1))
+            setPadding(dp(15), dp(13), dp(15), dp(13))
+            background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(15), dp(1))
         }
         statusDot = TextView(this).apply {
             text = "●"
             textSize = 16f
             setTextColor(Color.rgb(130, 142, 160))
-            setPadding(0, 0, dp(12), 0)
+            setPadding(0, 0, dp(11), 0)
         }
         statusCard.addView(statusDot)
         statusText = TextView(this).apply {
-            text = "Ready to connect"
+            text = "Ready when you are"
             textSize = 14f
             setTextColor(Color.rgb(69, 81, 101))
             gravity = Gravity.CENTER_VERTICAL
         }
         statusCard.addView(statusText, LinearLayout.LayoutParams(0, -2, 1f))
         val statusParams = LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = dp(16)
+            topMargin = dp(14)
         }
         content.addView(statusCard, statusParams)
 
@@ -150,7 +213,7 @@ class MainActivity : Activity() {
             textSize = 15f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
-            background = rounded(Color.rgb(38, 105, 224), Color.rgb(38, 105, 224), dp(14), 0)
+            background = rounded(blue, blue, dp(15), 0)
             setOnClickListener { requestStart() }
         }
         actions.addView(startButton, LinearLayout.LayoutParams(0, dp(54), 1f).apply {
@@ -161,7 +224,7 @@ class MainActivity : Activity() {
             isAllCaps = false
             textSize = 15f
             setTextColor(Color.rgb(65, 78, 99))
-            background = rounded(Color.rgb(231, 235, 242), Color.rgb(231, 235, 242), dp(14), 0)
+            background = rounded(Color.rgb(231, 235, 242), Color.rgb(231, 235, 242), dp(15), 0)
             isEnabled = false
             alpha = 0.55f
             setOnClickListener { stopRecording() }
@@ -172,16 +235,16 @@ class MainActivity : Activity() {
         })
 
         content.addView(TextView(this).apply {
-            text = "Keep Voxlink open while sending. Start the receiver on your computer first."
+            text = "Start the Voxlink receiver on your computer first. Keep this app open while sending."
             textSize = 13f
-            setTextColor(Color.rgb(119, 130, 148))
+            setTextColor(muted)
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(20), dp(8), 0)
         })
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(Color.rgb(245, 247, 251))
+            setBackgroundColor(page)
             addView(content)
         }
         setContentView(scroll)
@@ -189,8 +252,16 @@ class MainActivity : Activity() {
 
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(18), dp(18), dp(18), dp(18))
-        background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(18), dp(1))
+        setPadding(dp(18), dp(19), dp(18), dp(18))
+        background = rounded(Color.WHITE, Color.rgb(231, 235, 242), dp(19), dp(1))
+    }
+
+    private fun fieldLabel(label: String): TextView = TextView(this).apply {
+        text = label
+        textSize = 11f
+        letterSpacing = 0.07f
+        setTextColor(Color.rgb(113, 126, 147))
+        setTypeface(typeface, Typeface.BOLD)
     }
 
     private fun rounded(fill: Int, stroke: Int, radius: Int, strokeWidth: Int): GradientDrawable =
@@ -354,6 +425,15 @@ class MainActivity : Activity() {
     private fun setStatus(message: String, color: Int) {
         statusText.text = message
         statusDot.setTextColor(color)
+        val active = running && message.startsWith("Sending")
+        liveBadge.text = if (active) "●  LIVE" else "●  READY"
+        liveBadge.setTextColor(if (active) Color.rgb(142, 236, 187) else Color.rgb(173, 205, 255))
+        liveBadge.background = rounded(
+            if (active) Color.rgb(31, 77, 64) else Color.rgb(34, 61, 65),
+            if (active) Color.rgb(31, 77, 64) else Color.rgb(34, 61, 65),
+            dp(20),
+            0
+        )
     }
 
     private fun stopRecording() {
