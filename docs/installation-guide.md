@@ -19,7 +19,7 @@ Voxlink requests microphone access because it captures audio locally on the phon
 
 ### Android studio controls (current main build)
 
-The studio interface and controls are available in the Android APK artifact from the latest successful [Build downloads workflow](https://github.com/mrduhlol/Voxlink/actions/workflows/build-downloads.yml). Release APKs only include features present when that release was built.
+The studio interface and controls are available in the Android APK artifact from the latest successful [Build downloads workflow](https://github.com/mrduhlol/Voxlink/actions/workflows/release.yml). Release APKs only include features present when that release was built.
 
 - **Mute microphone** sends silence while keeping the stream open. Tap again to unmute.
 - **Mic gain** adjusts outgoing audio from 0–200%. Start at 100%; high gain can clip loud sounds. The meter shows the outgoing level.
