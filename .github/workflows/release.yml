@@ -76,12 +76,53 @@ jobs:
           path: dist/Voxlink-android-debug.apk
           if-no-files-found: error
 
+  desktop:
+    name: Build Omarchy desktop AppImage
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential curl file libayatana-appindicator3-dev libssl-dev \
+            libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build AppImage
+        working-directory: desktop
+        run: npm run tauri -- build --bundles appimage
+
+      - name: Upload desktop AppImage
+        uses: actions/upload-artifact@v5
+        with:
+          name: voxlink-desktop-linux-x86_64
+          path: desktop/src-tauri/target/release/bundle/appimage/Voxlink_0.2.0_amd64.AppImage
+          if-no-files-found: error
+
   release:
     name: Publish release assets
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - linux
       - android
+      - desktop
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -98,10 +139,17 @@ jobs:
           name: voxlink-android
           path: dist
 
+      - name: Download desktop AppImage
+        uses: actions/download-artifact@v5
+        with:
+          name: voxlink-desktop-linux-x86_64
+          path: dist
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/Voxlink-android-debug.apk
             dist/voxlink-receiver-linux-x86_64.tar.gz
+            dist/Voxlink_0.2.0_amd64.AppImage
           generate_release_notes: true
