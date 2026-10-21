@@ -21,27 +21,42 @@ Voxlink talks to the user's PulseAudio socket through `pipewire-pulse`. On Start
 
 The monitor source exists only while the Voxlink listener is running. Select **Voxlink Microphone** in the target application's input device list. Keep the Voxlink window open while using the source.
 
-## Omarchy prerequisites
+## Install the released AppImage
 
-Install the Tauri/Linux build libraries and the user-session PipeWire/PulseAudio tools:
+Download [Voxlink_0.2.0_amd64.AppImage](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage) from the [latest release](https://github.com/mrduhlol/Voxlink/releases/latest) and save it in `~/Downloads`. Make it executable and launch it:
+
+```sh
+chmod +x ~/Downloads/Voxlink_0.2.0_amd64.AppImage
+~/Downloads/Voxlink_0.2.0_amd64.AppImage
+```
+
+On first launch, click **Add to app menu**. Voxlink copies itself to `~/Applications/Voxlink.AppImage` and registers a launcher in your user profile. Later, press **Super**, search for Voxlink, and launch it from the app menu. This install is per-user and does not require root access or a source checkout.
+
+Voxlink uses the logged-in user's PipeWire/PulseAudio session. Check it with:
+
+```sh
+pactl info
+wpctl status
+```
+
+`pactl info` should show a local PulseAudio server, commonly `PulseAudio (on PipeWire ...)`. If the audio tools or services are missing, install/start them:
+
+```sh
+sudo pacman -S --needed libpulse pipewire pipewire-pulse wireplumber
+systemctl --user enable --now pipewire pipewire-pulse wireplumber
+```
+
+Do not run Voxlink with `sudo`; root would not have access to the logged-in user's audio server.
+
+## Build from source (developers)
+
+Most users should install the released AppImage above. For development, install the Tauri/Linux build libraries and tools:
 
 ```sh
 sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3 curl wget file openssl appmenu-gtk-module libappindicator-gtk3 librsvg xdotool libpulse pipewire pipewire-pulse wireplumber nodejs npm
 ```
 
-Install Rust with [rustup](https://rustup.rs/) if `cargo` is unavailable. Ensure the user audio session is active:
-
-```sh
-systemctl --user enable --now pipewire pipewire-pulse wireplumber
-pactl info
-wpctl status
-```
-
-`pactl info` should show a local PulseAudio server, commonly `PulseAudio (on PipeWire ...)`. Do not run Voxlink with `sudo`; root would not have access to the logged-in user's audio server.
-
-## Build and launch
-
-From the repository root:
+Install Rust with [rustup](https://rustup.rs/) if `cargo` is unavailable. From the repository root:
 
 ```sh
 cd desktop
