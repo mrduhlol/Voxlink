@@ -91,45 +91,41 @@ This option is useful when you only need a recording file, rather than a selecta
 
 ## 4. Omarchy desktop microphone
 
-Use this option to select the phone as a microphone in Linux applications. It creates a user-session PipeWire/PulseAudio source only while Voxlink is running.
+Use this option to select the phone as a microphone in Linux applications. The desktop AppImage is attached to the [latest Voxlink release](https://github.com/mrduhlol/Voxlink/releases/latest). You do not need to clone the repository or install build tools. Voxlink creates a user-session PipeWire/PulseAudio source only while it is running.
 
-1. Confirm PipeWire's PulseAudio compatibility service is available:
+1. On Omarchy, confirm the user audio services are running:
 
    ```sh
    pactl info
    ```
 
-   The server should be local and commonly reports `PulseAudio (on PipeWire ...)`. If the tools are missing on Omarchy, install the packages in step 2. Do not launch Voxlink with `sudo`.
+   The server should be local and commonly reports `PulseAudio (on PipeWire ...)`. Omarchy normally has PipeWire and its PulseAudio compatibility service ready. Do not launch Voxlink with `sudo`.
 
-2. Install build and audio dependencies on Omarchy:
-
-   ```sh
-   sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3 curl wget file openssl appmenu-gtk-module libappindicator-gtk3 librsvg xdotool libpulse pipewire pipewire-pulse wireplumber nodejs npm
-   ```
-
-   Install Rust with [rustup](https://rustup.rs/) if `cargo` is not available. On other Linux distributions, use the matching Tauri/WebKitGTK development packages; see the [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
-
-3. Enable the user audio services if they are not already running:
+   If `pactl` is unavailable or the PipeWire services are stopped, install/start them before continuing:
 
    ```sh
+   sudo pacman -S --needed libpulse pipewire pipewire-pulse wireplumber
    systemctl --user enable --now pipewire pipewire-pulse wireplumber
    pactl info
    ```
 
-4. Build and launch the desktop app from the repository root:
+2. Download [Voxlink_0.2.0_amd64.AppImage](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage) from the release page and save it in `~/Downloads`.
+
+3. Make the downloaded AppImage executable. Open a terminal and run:
 
    ```sh
-   cd desktop
-   npm ci
-   npm run tauri -- build
+   chmod +x ~/Downloads/Voxlink_0.2.0_amd64.AppImage
    ```
 
-   The AppImage is created under `desktop/src-tauri/target/release/bundle/appimage/`. Launch the `.AppImage` from the file manager, or from a terminal. For development, use `npm run tauri -- dev` instead of the build command.
+4. Launch `Voxlink_0.2.0_amd64.AppImage` from Downloads. On its first launch, click **Add to app menu**. Voxlink copies itself to `~/Applications/Voxlink.AppImage` and creates a launcher for your user; this does not require administrator access.
 
-5. In Voxlink, enter the PC's private Wi-Fi IPv4 address in **PC Wi-Fi address**. Find it with `ip -brief address`. Enter the phone's Wi-Fi IPv4 address in **Phone IP address** and leave the port at `4950`, unless you changed the sender port.
-6. Click **Start listening**. The app should show the listener ready and the temporary **Voxlink Microphone** input. Start the Android sender. Voxlink changes from Connecting to Connected after a valid packet arrives; its level meter should move when you speak.
-7. In Discord, OBS, a browser, or another audio application, select **Voxlink Microphone** as the input. If the app was already open before the source appeared, reopen its audio-device list.
-8. Click **Stop** in Voxlink when done. The temporary input is removed. Start Voxlink again before trying to select it in another session.
+5. After installation, press the **Super** key, search for **Voxlink**, and open it from the app menu. The downloaded copy can be deleted after the first launch because Voxlink installed its own copy under `~/Applications`.
+
+6. In Voxlink, enter the PC's private Wi-Fi IPv4 address in **PC Wi-Fi address**. Find it with `ip -brief address`. Enter the phone's Wi-Fi IPv4 address in **Phone IP address** and leave the port at `4950`, unless you changed the sender port. Click **Start listening**, then start the Android sender. Voxlink changes from Connecting to Connected after a valid packet arrives; its level meter should move when you speak.
+
+   In Discord, OBS, a browser, or another audio application, select **Voxlink Microphone** as the input. If the app was already open before the source appeared, reopen its audio-device list. Click **Stop** in Voxlink when done; the temporary input is removed.
+
+On other Linux distributions, use their package manager to install PipeWire, the PulseAudio compatibility service, and `pactl`. Voxlink is built with Tauri and WebKitGTK; see [Tauri's Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux) only if you choose to build from source.
 
 ### Omarchy quick checks
 
