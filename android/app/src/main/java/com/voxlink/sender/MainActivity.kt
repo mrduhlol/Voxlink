@@ -52,8 +52,8 @@ class MainActivity : Activity() {
     private lateinit var statsText: TextView
     private lateinit var phoneAddressText: TextView
     private var sessionStarted = 0L
-    private var sentPackets = 0L
-    private var sentBytes = 0L
+    @Volatile private var sentPackets = 0L
+    @Volatile private var sentBytes = 0L
 
     private val pageColor = Color.rgb(16, 19, 17)
     private val panelColor = Color.rgb(23, 27, 24)
@@ -474,10 +474,13 @@ class MainActivity : Activity() {
 
         try {
             val destination = InetAddress.getByName(host)
+            if (!running) return
             socket = DatagramSocket()
             recorder = createRecorder()
             activeRecorder = recorder
+            if (!running) return
             recorder.startRecording()
+            if (!running) return
             if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
                 throw IOException("Android did not start microphone capture")
             }
@@ -494,6 +497,7 @@ class MainActivity : Activity() {
                     if (!running) break
                     throw IOException("Audio capture failed (code $count)")
                 }
+                if (!running) break
                 if (count == 0) continue
 
                 var inputPeak = 0
@@ -600,7 +604,7 @@ class MainActivity : Activity() {
     }
 
     private fun showStatus(message: String) {
-        runOnUiThread { setStatus(message, Color.rgb(38, 153, 105)) }
+        runOnUiThread { if (running) setStatus(message, limeColor) }
     }
 
     private fun setStatus(message: String, color: Int) {
