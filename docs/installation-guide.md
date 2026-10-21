@@ -105,23 +105,27 @@ Use this option to select the phone as a microphone in Linux applications. The d
 
    ```sh
    sudo pacman -S --needed libpulse pipewire pipewire-pulse wireplumber
+   ```
+   ```
    systemctl --user enable --now pipewire pipewire-pulse wireplumber
+   ```
+   ```
    pactl info
    ```
 
-2. Download [Voxlink_0.2.0_amd64.AppImage](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage) from the release page and save it in `~/Downloads`.
+3. Download [Voxlink_0.2.0_amd64.AppImage](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage) from the release page and save it in `~/Downloads`.
 
-3. Make the downloaded AppImage executable. Open a terminal and run:
+4. Make the downloaded AppImage executable. Open a terminal and run:
 
    ```sh
    chmod +x ~/Downloads/Voxlink_0.2.0_amd64.AppImage
    ```
 
-4. Launch `Voxlink_0.2.0_amd64.AppImage` from Downloads. On its first launch, click **Add to app menu**. Voxlink copies itself to `~/Applications/Voxlink.AppImage` and creates a launcher for your user; this does not require administrator access.
+5. Launch `Voxlink_0.2.0_amd64.AppImage` from Downloads. On its first launch, click **Add to app menu**. Voxlink copies itself to `~/Applications/Voxlink.AppImage` and creates a launcher for your user; this does not require administrator access.
 
-5. After installation, press the **Super** key, search for **Voxlink**, and open it from the app menu. The downloaded copy can be deleted after the first launch because Voxlink installed its own copy under `~/Applications`.
+6. After installation, press the **Super** key, search for **Voxlink**, and open it from the app menu. The downloaded copy can be deleted after the first launch because Voxlink installed its own copy under `~/Applications`.
 
-6. In Voxlink, enter the PC's private Wi-Fi IPv4 address in **PC Wi-Fi address**. Find it with `ip -brief address`. Enter the phone's Wi-Fi IPv4 address in **Phone IP address** and leave the port at `4950`, unless you changed the sender port. Click **Start listening**, then start the Android sender. Voxlink changes from Connecting to Connected after a valid packet arrives; its level meter should move when you speak.
+7. In Voxlink, enter the PC's private Wi-Fi IPv4 address in **PC Wi-Fi address**. Find it with `ip -brief address`. Enter the phone's Wi-Fi IPv4 address in **Phone IP address** and leave the port at `4950`, unless you changed the sender port. Click **Start listening**, then start the Android sender. Voxlink changes from Connecting to Connected after a valid packet arrives; its level meter should move when you speak.
 
    In Discord, OBS, a browser, or another audio application, select **Voxlink Microphone** as the input. If the app was already open before the source appeared, reopen its audio-device list. Click **Stop** in Voxlink when done; the temporary input is removed.
 
