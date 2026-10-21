@@ -5,7 +5,9 @@ use libpulse_simple_binding::Simple as PulseSimple;
 use pulse::sample::{Format, Spec};
 use pulse::stream::Direction;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -115,6 +117,13 @@ struct LocalAddress {
     ip: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppImageInstallState {
+    available: bool,
+    installed: bool,
+}
+
 struct VirtualSink {
     module_id: Option<String>,
     owned: bool,
@@ -126,7 +135,9 @@ struct AudioFrame {
 }
 
 fn lock_status(status: &Arc<Mutex<SharedStatus>>) -> MutexGuard<'_, SharedStatus> {
-    status.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    status
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn set_start_error(status: &Arc<Mutex<SharedStatus>>, message: String, recovery: String) {
@@ -161,11 +172,8 @@ fn list_has_name(output: &str, name: &str) -> bool {
 }
 
 fn ensure_virtual_sink() -> Result<VirtualSink, String> {
-    pactl(&["info"]).map_err(|error| {
-        format!(
-            "The PulseAudio compatibility service is unavailable: {error}"
-        )
-    })?;
+    pactl(&["info"])
+        .map_err(|error| format!("The PulseAudio compatibility service is unavailable: {error}"))?;
 
     let sinks = pactl(&["list", "short", "sinks"])?;
     let mut sink = if list_has_name(&sinks, VIRTUAL_SINK) {
@@ -192,13 +200,11 @@ fn ensure_virtual_sink() -> Result<VirtualSink, String> {
         }
     };
 
-    let source_ready = (0..8).any(|_| {
-        match pactl(&["list", "short", "sources"]) {
-            Ok(sources) if list_has_name(&sources, VIRTUAL_SOURCE) => true,
-            _ => {
-                thread::sleep(Duration::from_millis(75));
-                false
-            }
+    let source_ready = (0..8).any(|_| match pactl(&["list", "short", "sources"]) {
+        Ok(sources) if list_has_name(&sources, VIRTUAL_SOURCE) => true,
+        _ => {
+            thread::sleep(Duration::from_millis(75));
+            false
         }
     });
     if !source_ready {
@@ -240,7 +246,9 @@ fn validate_config(config: &StartConfig) -> Result<(Ipv4Addr, Ipv4Addr), String>
         return Err("The phone address must be a private LAN IPv4 address.".to_string());
     }
     if config.port < 1024 {
-        return Err("Choose a UDP port from 1024 to 65535; 4950 is the Android default.".to_string());
+        return Err(
+            "Choose a UDP port from 1024 to 65535; 4950 is the Android default.".to_string(),
+        );
     }
     if !(1_000..=6_000).contains(&config.timeout_ms) {
         return Err("Disconnect timeout must be between 1 and 6 seconds.".to_string());
@@ -286,10 +294,110 @@ fn get_status(state: State<'_, DesktopState>) -> StatusView {
     lock_status(&state.status).snapshot()
 }
 
+fn appimage_paths() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
+    let source = PathBuf::from(std::env::var_os("APPIMAGE")?);
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let data_dir = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home.join(".local/share"));
+    let installed_image = home.join("Applications/Voxlink.AppImage");
+    let desktop_entry = data_dir.join("applications/voxlink.desktop");
+    let icon = data_dir.join("icons/hicolor/512x512/apps/voxlink.png");
+    Some((source, installed_image, desktop_entry, icon))
+}
+
+fn desktop_exec_path(path: &std::path::Path) -> String {
+    let escaped = path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%");
+    format!("\"{escaped}\"")
+}
+
+#[tauri::command]
+fn get_appimage_install_state() -> AppImageInstallState {
+    let Some((source, installed_image, desktop_entry, _)) = appimage_paths() else {
+        return AppImageInstallState {
+            available: false,
+            installed: false,
+        };
+    };
+    let available = source.is_file();
+    let installed = installed_image.is_file()
+        && fs::read_to_string(&desktop_entry)
+            .is_ok_and(|contents| contents.contains(&desktop_exec_path(&installed_image)));
+    AppImageInstallState {
+        available,
+        installed,
+    }
+}
+
+#[tauri::command]
+fn install_appimage_launcher() -> Result<String, String> {
+    let (source, installed_image, desktop_entry, icon) = appimage_paths().ok_or_else(|| {
+        "Launch Voxlink from its AppImage to add it to the app launcher.".to_string()
+    })?;
+    if !source.is_file() {
+        return Err("The running Voxlink AppImage could not be found.".to_string());
+    }
+
+    let source = source
+        .canonicalize()
+        .map_err(|error| format!("Could not locate the running AppImage: {error}"))?;
+    if source != installed_image {
+        let parent = installed_image
+            .parent()
+            .ok_or_else(|| "Could not determine the Voxlink install folder.".to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+        fs::copy(&source, &installed_image).map_err(|error| {
+            format!(
+                "Could not copy Voxlink to {}: {error}",
+                installed_image.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&installed_image, fs::Permissions::from_mode(0o755)).map_err(
+                |error| format!("Could not make the installed AppImage executable: {error}"),
+            )?;
+        }
+    }
+
+    let desktop_parent = desktop_entry
+        .parent()
+        .ok_or_else(|| "Could not determine the applications folder.".to_string())?;
+    let icon_parent = icon
+        .parent()
+        .ok_or_else(|| "Could not determine the icons folder.".to_string())?;
+    fs::create_dir_all(desktop_parent)
+        .map_err(|error| format!("Could not create {}: {error}", desktop_parent.display()))?;
+    fs::create_dir_all(icon_parent)
+        .map_err(|error| format!("Could not create {}: {error}", icon_parent.display()))?;
+    fs::write(&icon, include_bytes!("../icons/icon.png"))
+        .map_err(|error| format!("Could not install the Voxlink icon: {error}"))?;
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName=Voxlink\nComment=Use your Android phone as a Linux microphone\nExec={}\nIcon={}\nTerminal=false\nCategories=AudioVideo;Audio;\nStartupNotify=true\n",
+        desktop_exec_path(&installed_image),
+        icon.display()
+    );
+    fs::write(&desktop_entry, entry)
+        .map_err(|error| format!("Could not add Voxlink to the app launcher: {error}"))?;
+    info!(image = %installed_image.display(), entry = %desktop_entry.display(), "Voxlink app launcher entry installed");
+    Ok(installed_image.display().to_string())
+}
+
 #[tauri::command]
 fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(), String> {
     let (bind_ip, phone_ip) = validate_config(&config).map_err(|error| {
-        set_start_error(&state.status, error.clone(), "Check the network fields and select a private Wi-Fi address.".to_string());
+        set_start_error(
+            &state.status,
+            error.clone(),
+            "Check the network fields and select a private Wi-Fi address.".to_string(),
+        );
         error
     })?;
 
@@ -319,7 +427,8 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
             set_start_error(
                 &state.status,
                 error.clone(),
-                "Install and start pipewire-pulse, then confirm `pactl info` works for your user.".to_string(),
+                "Install and start pipewire-pulse, then confirm `pactl info` works for your user."
+                    .to_string(),
             );
             return Err(error);
         }
@@ -339,7 +448,11 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
     if let Err(error) = socket.set_read_timeout(Some(Duration::from_millis(50))) {
         let message = format!("Could not configure the UDP listener: {error}");
         let _ = unload_virtual_sink(&sink);
-        set_start_error(&state.status, message.clone(), "Restart Voxlink and check the local socket permissions.".to_string());
+        set_start_error(
+            &state.status,
+            message.clone(),
+            "Restart Voxlink and check the local socket permissions.".to_string(),
+        );
         return Err(message);
     }
 
@@ -358,7 +471,11 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
         Err(error) => {
             let message = format!("Could not start the audio output thread: {error}");
             let _ = unload_virtual_sink(&sink);
-            set_start_error(&state.status, message.clone(), "Restart Voxlink; check available memory and process limits.".to_string());
+            set_start_error(
+                &state.status,
+                message.clone(),
+                "Restart Voxlink; check available memory and process limits.".to_string(),
+            );
             return Err(message);
         }
     };
@@ -378,8 +495,7 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
                 audio_for_receiver,
                 status_for_receiver,
             )
-        })
-    {
+        }) {
         Ok(thread) => thread,
         Err(error) => {
             stop.store(true, Ordering::Relaxed);
@@ -387,7 +503,11 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
             let _ = audio_thread.join();
             let message = format!("Could not start the UDP receive thread: {error}");
             let _ = unload_virtual_sink(&sink);
-            set_start_error(&state.status, message.clone(), "Restart Voxlink; check available memory and process limits.".to_string());
+            set_start_error(
+                &state.status,
+                message.clone(),
+                "Restart Voxlink; check available memory and process limits.".to_string(),
+            );
             return Err(message);
         }
     };
@@ -475,7 +595,9 @@ fn stop_runtime(state: &DesktopState) -> Result<(), String> {
             error!(%error, "could not remove Voxlink virtual sink");
             let mut shared = lock_status(&state.status);
             shared.view.virtual_microphone = MicrophoneState::Error;
-            shared.view.error = Some(format!("Audio stopped, but the virtual sink could not be removed: {error}"));
+            shared.view.error = Some(format!(
+                "Audio stopped, but the virtual sink could not be removed: {error}"
+            ));
             shared.view.recovery = Some("Use `pactl list short modules` to find the Voxlink null-sink module, then unload it with `pactl unload-module MODULE_ID`.".to_string());
             Err(error)
         }
@@ -496,7 +618,10 @@ fn audio_writer(receiver: Receiver<AudioFrame>, status: Arc<Mutex<SharedStatus>>
                 rate: frame.sample_rate,
             };
             if !spec.is_valid() {
-                set_audio_error(&status, format!("Unsupported PCM sample rate: {} Hz", frame.sample_rate));
+                set_audio_error(
+                    &status,
+                    format!("Unsupported PCM sample rate: {} Hz", frame.sample_rate),
+                );
                 continue;
             }
             match PulseSimple::new(
@@ -517,7 +642,11 @@ fn audio_writer(receiver: Receiver<AudioFrame>, status: Arc<Mutex<SharedStatus>>
                     shared.view.virtual_microphone = MicrophoneState::Ready;
                     shared.view.error = None;
                     shared.view.recovery = None;
-                    info!(sample_rate = frame.sample_rate, sink = VIRTUAL_SINK, "PulseAudio playback stream ready");
+                    info!(
+                        sample_rate = frame.sample_rate,
+                        sink = VIRTUAL_SINK,
+                        "PulseAudio playback stream ready"
+                    );
                 }
                 Err(error) => {
                     set_audio_error(
@@ -531,7 +660,10 @@ fn audio_writer(receiver: Receiver<AudioFrame>, status: Arc<Mutex<SharedStatus>>
 
         if let Some(stream) = output.as_ref() {
             if let Err(error) = stream.write(&frame.pcm) {
-                warn!(?error, "PulseAudio write failed; will reconnect on the next packet");
+                warn!(
+                    ?error,
+                    "PulseAudio write failed; will reconnect on the next packet"
+                );
                 output = None;
                 output_rate = None;
                 set_audio_error(&status, format!("Audio output failed: {error:?}"));
@@ -674,7 +806,9 @@ fn pcm_levels(pcm: &[u8]) -> (f32, f32) {
 
 pub fn run() {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .with_target(false)
         .init();
 
@@ -683,6 +817,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_local_addresses,
             get_status,
+            get_appimage_install_state,
+            install_appimage_launcher,
             start_stream,
             stop_stream
         ])
