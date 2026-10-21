@@ -45,6 +45,15 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--green); out
 .privacy-dot, .foot-dot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgba(194,240,106,.42); }
 .version-label { color: #737d74; font-size: 9px; }
 
+.appimage-install-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding: 13px 15px; border: 1px solid #3a4634; border-radius: 7px; background: linear-gradient(110deg, rgba(194,240,106,.08), rgba(27,32,28,.88)); }
+.appimage-install-card > div { display: flex; flex-direction: column; gap: 4px; }
+.appimage-install-card strong { color: #e4e9df; font-size: 11px; }
+.appimage-install-card span, .appimage-install-message { color: #9ca79a; font-size: 10px; }
+.appimage-install-card .button { flex: 0 0 auto; }
+.appimage-install-message { margin: 7px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
+.appimage-install-message.success { color: var(--green); }
+.appimage-install-message.error { color: var(--red); }
+
 .hero-row { display: grid; grid-template-columns: 1.08fr .92fr; align-items: center; gap: 52px; padding: 39px 0 34px; }
 .eyebrow { color: #a8b19f; font-size: 9px; line-height: 1; letter-spacing: .15em; }
 .hero-row .eyebrow { display: flex; align-items: center; gap: 11px; }
