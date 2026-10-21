@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type Connection = "disconnected" | "connecting" | "connected" | "error";
 type LocalAddress = { name: string; ip: string };
+type AppImageInstallState = { available: boolean; installed: boolean };
 type DesktopStatus = {
   connection: Connection;
   listening: boolean;
@@ -86,6 +87,9 @@ function App() {
   const [status, setStatus] = useState<DesktopStatus>(EMPTY_STATUS);
   const [busy, setBusy] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [appImageInstall, setAppImageInstall] = useState<AppImageInstallState>({ available: false, installed: false });
+  const [appImageInstallMessage, setAppImageInstallMessage] = useState<string | null>(null);
+  const [installingAppImage, setInstallingAppImage] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("voxlink.desktop.settings", JSON.stringify(settings));
@@ -108,6 +112,9 @@ function App() {
       setAddresses(localAddresses);
       setSettings((current) => current.bindIp || !localAddresses.length ? current : { ...current, bindIp: localAddresses[0].ip });
     }).catch((error) => { if (mounted) setBackendError(String(error)); });
+    void invoke<AppImageInstallState>("get_appimage_install_state").then((installState) => {
+      if (mounted) setAppImageInstall(installState);
+    }).catch((error) => { if (mounted) setAppImageInstallMessage(String(error)); });
     void refresh();
     const timer = window.setInterval(() => void refresh(), 200);
     return () => { mounted = false; window.clearInterval(timer); };
@@ -148,6 +155,20 @@ function App() {
     }
   }
 
+  async function installAppImage() {
+    setInstallingAppImage(true);
+    setAppImageInstallMessage(null);
+    try {
+      const installedPath = await invoke<string>("install_appimage_launcher");
+      setAppImageInstall({ available: true, installed: true });
+      setAppImageInstallMessage(`Added to your app menu. AppImage copied to ${installedPath}`);
+    } catch (error) {
+      setAppImageInstallMessage(String(error));
+    } finally {
+      setInstallingAppImage(false);
+    }
+  }
+
   const connectionMessage = backendError ?? (status.connection === "connected"
     ? `Receiving live audio from ${status.phoneAddress ?? "your phone"}.`
     : active ? "Listening on your Wi-Fi interface. Start the Android sender to connect."
@@ -162,6 +183,12 @@ function App() {
         </div>
         <div className="topbar-right"><span className="privacy-chip"><span className="privacy-dot" />LOCAL ONLY</span><span className="version-label">DESKTOP 0.2</span></div>
       </header>
+
+      {appImageInstall.available && !appImageInstall.installed && <section className="appimage-install-card" aria-label="Install Voxlink in the app menu">
+        <div><strong>Make Voxlink easy to launch</strong><span>Add Voxlink to your app menu. Then search for it with the Super key.</span></div>
+        <button className="button button-primary" onClick={() => void installAppImage()} disabled={installingAppImage}>{installingAppImage ? "Adding…" : "Add to app menu"}</button>
+      </section>}
+      {appImageInstallMessage && <p className={`appimage-install-message ${appImageInstall.installed ? "success" : "error"}`} role="status">{appImageInstallMessage}</p>}
 
       <section className="hero-row">
         <div>
