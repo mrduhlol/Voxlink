@@ -42,6 +42,19 @@ class MainActivity : Activity() {
         buildControls()
     }
 
+    @Volatile private var muted = false
+    @Volatile private var gain = 1f
+    @Volatile private var gateDb = -60
+    private var preferredRate = 48000
+    private var keepAwake = true
+    private lateinit var muteButton: Button
+    private lateinit var rateButton: Button
+    private lateinit var statsText: TextView
+    private lateinit var phoneAddressText: TextView
+    private var sessionStarted = 0L
+    private var sentPackets = 0L
+    private var sentBytes = 0L
+
     private val pageColor = Color.rgb(16, 19, 17)
     private val panelColor = Color.rgb(23, 27, 24)
     private val lineColor = Color.rgb(42, 49, 44)
@@ -196,6 +209,8 @@ class MainActivity : Activity() {
         actions.addView(stopButton, LinearLayout.LayoutParams(dp(80), dp(54)))
         connection.addView(actions)
         content.addView(connection)
+        space(content, 14)
+        content.addView(featureControls())
         space(content, 19)
         content.addView(label("● Audio stays on your local network.", 11f, mutedColor).apply { gravity = Gravity.CENTER })
         space(content, 7)
@@ -213,6 +228,166 @@ class MainActivity : Activity() {
                 insets.consumeSystemWindowInsets()
             }
         })
+    }
+
+    private fun action(title: String, onClick: () -> Unit): Button = Button(this).apply {
+        text = title
+        isAllCaps = false
+        textSize = 13f
+        setTextColor(brightColor)
+        background = rounded(lineColor, lineColor, dp(10), 0)
+        setOnClickListener { onClick() }
+    }
+
+    private fun featureControls(): LinearLayout {
+        val prefs = getPreferences(MODE_PRIVATE)
+        gain = prefs.getFloat("gain", 1f).coerceIn(0f, 2f)
+        gateDb = prefs.getInt("gate", -60).coerceIn(-60, -20)
+        preferredRate = prefs.getInt("rate", 48000).let { if (it == 44100) it else 48000 }
+        keepAwake = prefs.getBoolean("awake", true)
+        val controls = card()
+        section(controls, "03", "MICROPHONE CONTROLS")
+        muteButton = action("Mute microphone") {
+            muted = !muted
+            muteButton.text = if (muted) "Unmute microphone" else "Mute microphone"
+            muteButton.setTextColor(if (muted) Color.rgb(255, 119, 113) else brightColor)
+            if (running) {
+                liveBadge.text = if (muted) "● MUTED" else "● SENDING"
+                sessionTitle.text = if (muted) "Microphone muted" else "You're on air"
+            }
+        }
+        controls.addView(muteButton, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 15)
+        val gainLabel = label("MIC GAIN  ·  ${(gain * 100).toInt()}%", 11f, mutedColor, mono = true)
+        controls.addView(gainLabel)
+        controls.addView(android.widget.SeekBar(this).apply {
+            max = 200
+            progress = (gain * 100).toInt()
+            contentDescription = "Microphone gain from zero to two hundred percent"
+            progressTintList = android.content.res.ColorStateList.valueOf(limeColor)
+            thumbTintList = android.content.res.ColorStateList.valueOf(limeColor)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: android.widget.SeekBar?, value: Int, user: Boolean) {
+                    gain = value / 100f
+                    gainLabel.text = "MIC GAIN  ·  $value%"
+                }
+                override fun onStartTrackingTouch(bar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(bar: android.widget.SeekBar?) { prefs.edit().putFloat("gain", gain).apply() }
+            })
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        val gateLabel = label(if (gateDb == -60) "NOISE GATE  ·  OFF" else "NOISE GATE  ·  $gateDb dBFS", 11f, mutedColor, mono = true)
+        controls.addView(gateLabel)
+        controls.addView(android.widget.SeekBar(this).apply {
+            max = 40
+            progress = gateDb + 60
+            contentDescription = "Noise gate threshold; minimum turns gate off"
+            progressTintList = android.content.res.ColorStateList.valueOf(limeColor)
+            thumbTintList = android.content.res.ColorStateList.valueOf(limeColor)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: android.widget.SeekBar?, value: Int, user: Boolean) {
+                    gateDb = value - 60
+                    gateLabel.text = if (value == 0) "NOISE GATE  ·  OFF" else "NOISE GATE  ·  $gateDb dBFS"
+                }
+                override fun onStartTrackingTouch(bar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(bar: android.widget.SeekBar?) { prefs.edit().putInt("gate", gateDb).apply() }
+            })
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        controls.addView(label("Quiet audio below the threshold is silenced. Gain above 100% can clip loud sounds.", 11f))
+        space(controls, 14)
+        rateButton = action("Sample rate: ${preferredRate / 1000f} kHz") {
+            preferredRate = if (preferredRate == 48000) 44100 else 48000
+            rateButton.text = "Sample rate: ${preferredRate / 1000f} kHz"
+            prefs.edit().putInt("rate", preferredRate).apply()
+        }
+        controls.addView(rateButton, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 10)
+        controls.addView(android.widget.Switch(this).apply {
+            text = "Keep screen awake while streaming"
+            textSize = 13f
+            setTextColor(brightColor)
+            isChecked = keepAwake
+            setOnCheckedChangeListener { _, checked ->
+                keepAwake = checked
+                prefs.edit().putBoolean("awake", checked).apply()
+                updateScreenAwake()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(52)))
+        space(controls, 20)
+        section(controls, "04", "CONNECTION TOOLS")
+        phoneAddressText = label("", 12f, limeColor, mono = true)
+        controls.addView(phoneAddressText)
+        fun refreshAddresses() {
+            Thread {
+                val addresses = try {
+                    java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())
+                        .filter { it.isUp && !it.isLoopback }
+                        .flatMap { iface -> java.util.Collections.list(iface.inetAddresses)
+                            .filter { it is java.net.Inet4Address && it.isSiteLocalAddress }
+                            .map { "${iface.name}: ${it.hostAddress}" } }
+                } catch (_: Exception) { emptyList<String>() }
+                runOnUiThread {
+                    phoneAddressText.text = if (addresses.isEmpty()) "No local IPv4 address. Connect to Wi-Fi." else addresses.joinToString("\n")
+                }
+            }.start()
+        }
+        refreshAddresses()
+        space(controls, 8)
+        controls.addView(action("Refresh phone addresses") { refreshAddresses() }, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 8)
+        controls.addView(action("Copy phone addresses") {
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Phone network addresses", phoneAddressText.text))
+            android.widget.Toast.makeText(this, "Addresses copied", android.widget.Toast.LENGTH_SHORT).show()
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 8)
+        controls.addView(action("Save this computer") {
+            val host = addressInput.text.toString().trim()
+            val port = portInput.text.toString().toIntOrNull()
+            if (host.isBlank() || port == null || port !in 1..65535) {
+                setStatus("Enter a valid computer IP and UDP port.", Color.rgb(237, 189, 102))
+            } else {
+                val profiles = org.json.JSONArray(prefs.getString("profiles", "[]"))
+                val entry = "$host:$port"
+                val entries = (0 until profiles.length()).map { profiles.getString(it) }.filter { it != entry }
+                val updated = org.json.JSONArray()
+                updated.put(entry)
+                entries.take(9).forEach { updated.put(it) }
+                prefs.edit().putString("profiles", updated.toString()).apply()
+                android.widget.Toast.makeText(this, "Computer saved", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 8)
+        controls.addView(action("Choose saved computer") {
+            if (!running && worker?.isAlive != true) {
+                val profiles = org.json.JSONArray(prefs.getString("profiles", "[]"))
+                val entries = (0 until profiles.length()).map { profiles.getString(it) }.toTypedArray()
+                if (entries.isEmpty()) android.widget.Toast.makeText(this, "Save a computer first", android.widget.Toast.LENGTH_SHORT).show()
+                else android.app.AlertDialog.Builder(this).setTitle("Saved computers")
+                    .setItems(entries) { _, index ->
+                        val entry = entries[index]
+                        addressInput.setText(entry.substringBeforeLast(':'))
+                        portInput.setText(entry.substringAfterLast(':'))
+                    }.setNegativeButton("Cancel", null).show()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 20)
+        section(controls, "05", "SESSION STATISTICS")
+        statsText = label("00:00  ·  0 packets  ·  0 KB sent", 12f, brightColor, mono = true)
+        controls.addView(statsText)
+        space(controls, 8)
+        controls.addView(label("Counts show audio sent by this phone. Receiver delivery is shown in the desktop app.", 11f))
+        space(controls, 14)
+        controls.addView(action("Setup & troubleshooting") {
+            android.app.AlertDialog.Builder(this).setTitle("Connect Voxlink")
+                .setMessage("1. Connect your phone and PC to the same Wi-Fi.\n\n2. In the desktop app, choose the PC's current Wi-Fi address. Use this phone's Wi-Fi address in the Phone IP field. Addresses above are labelled by network interface; avoid VPN addresses.\n\n3. Tap Start listening on the desktop.\n\n4. Enter the PC address here with the same UDP port, then start streaming.\n\nCannot assign requested address means the PC address is wrong. No packets may mean a wrong phone address, firewall, or Wi-Fi client isolation.\n\nKeep this app in the foreground. Muting sends silence and keeps the stream open.")
+                .setPositiveButton("Got it", null).show()
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        return controls
+    }
+
+    private fun updateScreenAwake() {
+        if (running && keepAwake) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun input(value: String, placeholder: String, numeric: Boolean): EditText = EditText(this).apply {
@@ -271,11 +446,17 @@ class MainActivity : Activity() {
     }
 
     private fun startRecording(address: String, port: Int) {
-        if (running) return
+        if (running || worker?.isAlive == true) return
         getPreferences(MODE_PRIVATE).edit().putString("host", address).putString("port", port.toString()).apply()
         addressInput.isEnabled = false
         portInput.isEnabled = false
         running = true
+        rateButton.isEnabled = false
+        sessionStarted = android.os.SystemClock.elapsedRealtime()
+        sentPackets = 0
+        sentBytes = 0
+        statsText.text = "00:00  ·  0 packets  ·  0 KB sent"
+        updateScreenAwake()
         startButton.isEnabled = false
         startButton.alpha = 0.55f
         stopButton.isEnabled = true
@@ -315,6 +496,14 @@ class MainActivity : Activity() {
                 }
                 if (count == 0) continue
 
+                var inputPeak = 0
+                for (index in 0 until count) inputPeak = maxOf(inputPeak, kotlin.math.abs(samples[index].toInt()))
+                val inputDb = if (inputPeak == 0) -96.0 else 20 * kotlin.math.log10(inputPeak / 32768.0)
+                val silence = muted || (gateDb > -60 && inputDb < gateDb)
+                val packetGain = gain
+                for (index in 0 until count) {
+                    samples[index] = if (silence) 0 else (samples[index] * packetGain).toInt().coerceIn(-32768, 32767).toShort()
+                }
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastMeterUpdate >= 80) {
                     lastMeterUpdate = now
@@ -324,7 +513,11 @@ class MainActivity : Activity() {
                     runOnUiThread {
                         if (running) {
                             levelMeter.progress = ((db + 60) / 60 * 100).toInt()
-                            levelText.text = "${db.toInt()} dBFS"
+                            levelText.text = if (muted) "MUTED" else "${db.toInt()} dBFS"
+                            val elapsed = (android.os.SystemClock.elapsedRealtime() - sessionStarted) / 1000
+                            statsText.text = "%02d:%02d  ·  %d packets  ·  %d KB sent".format(elapsed / 60, elapsed % 60, sentPackets, sentBytes / 1024)
+                            liveBadge.text = if (muted) "● MUTED" else "● SENDING"
+                            sessionTitle.text = if (muted) "Microphone muted" else "You're on air"
                         }
                     }
                 }
@@ -342,6 +535,8 @@ class MainActivity : Activity() {
                 }
                 socket.send(DatagramPacket(packetBytes, packetBytes.size, destination, port))
                 sequence++
+                sentPackets++
+                sentBytes += packetBytes.size
             }
         } catch (error: Exception) {
             if (running) failure = error.message ?: error.javaClass.simpleName
@@ -356,6 +551,8 @@ class MainActivity : Activity() {
             recorder?.release()
             socket?.close()
             runOnUiThread {
+                updateScreenAwake()
+                rateButton.isEnabled = true
                 addressInput.isEnabled = true
                 portInput.isEnabled = true
                 startButton.isEnabled = true
@@ -369,7 +566,7 @@ class MainActivity : Activity() {
     }
 
     private fun createRecorder(): AudioRecord {
-        val rates = intArrayOf(48_000, 44_100)
+        val rates = if (preferredRate == 44100) intArrayOf(44100, 48000) else intArrayOf(48000, 44100)
         for (rate in rates) {
             val minimum = AudioRecord.getMinBufferSize(
                 rate,
@@ -429,6 +626,12 @@ class MainActivity : Activity() {
             // Capture may already have stopped after an audio error.
         }
         setStatus("Stopping…", Color.rgb(197, 116, 20))
+    }
+
+    override fun onStop() {
+        // Recording is foreground-only; avoid capturing after the app is hidden.
+        stopRecording()
+        super.onStop()
     }
 
     override fun onDestroy() {
