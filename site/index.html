@@ -7,6 +7,13 @@
   <meta name="description" content="Download Voxlink: stream your Android phone microphone to Linux over your local Wi-Fi network.">
   <title>Voxlink — your phone, now a microphone</title>
   <style>
+    @font-face {
+      font-family: 'Instrument Sans';
+      src: url('./fonts/instrument-sans-latin.woff2') format('woff2');
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+    }
     :root {
       color-scheme: dark;
       --ink: #f4f2e9;
@@ -17,7 +24,7 @@
       --acid: #c1fa72;
       --acid-ink: #15210d;
       --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; background: var(--ground); }
@@ -46,13 +53,13 @@
     .text-link { color: #dce3d7; font-size: 13px; text-decoration: none; }
     .text-link:hover { color: var(--acid); }
     .compat { margin-top: 18px; color: #8f9b8d; font-family: var(--mono); font-size: 11px; letter-spacing: .02em; }
-    .visual { min-height: 335px; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #3a4738; border-radius: 15px; background: #141b14; }
+    .visual { min-height: 335px; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; border: 1px solid #3a4738; border-radius: 15px; background: #141b14; }
     .visual:before, .visual:after { position: absolute; content: ""; width: 240px; height: 240px; border: 1px solid #344031; border-radius: 50%; }
     .visual:after { width: 330px; height: 330px; }
     .signal { position: relative; z-index: 1; width: min(87%, 400px); height: 150px; }
     .signal path { fill: none; stroke: var(--acid); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
     .signal .faint { stroke: #506248; stroke-width: 1; }
-    .signal-meta { position: absolute; z-index: 2; left: 20px; right: 20px; bottom: 18px; display: flex; justify-content: space-between; color: #95a28f; font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .signal-meta { position: absolute; z-index: 2; left: 20px; right: 20px; bottom: 18px; display: flex; justify-content: space-between; color: #95a28f; font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
     .download { border-top: 1px solid var(--line); padding: 70px 0 85px; }
     .section-head { display: flex; justify-content: space-between; align-items: end; gap: 30px; margin-bottom: 29px; }
     h2 { margin: 0; font-size: clamp(31px, 4vw, 46px); line-height: 1.05; letter-spacing: -.055em; font-weight: 620; }
@@ -63,7 +70,7 @@
     .platform { color: var(--acid); font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
     h3 { margin: 23px 0 9px; font-size: 22px; font-weight: 620; letter-spacing: -.04em; }
     .download-item p { min-height: 46px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-    .item-meta { margin-top: 13px; color: #879184; font: 10px var(--mono); }
+    .item-meta { margin-top: 13px; color: #879184; font: 11px var(--mono); }
     .download-link { display: inline-flex; align-items: center; gap: 9px; margin-top: auto; padding-top: 23px; color: var(--ink); font-size: 13px; font-weight: 650; text-decoration: none; }
     .download-link svg { color: var(--acid); transition: transform .18s ease; }
     .download-link:hover { color: var(--acid); }
@@ -155,7 +162,7 @@
             <span class="platform">Android · Phone</span>
             <h3>Voxlink Sender</h3>
             <p>Streams your phone microphone to a computer on the same Wi-Fi network.</p>
-            <span class="item-meta">APK · ANDROID 8+</span>
+            <span class="item-meta">APK · ANDROID 6+</span>
             <a class="download-link" href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk">Download APK <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10m0 0-4-4m4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
           </article>
           <article class="download-item">
