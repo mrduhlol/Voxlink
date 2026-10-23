@@ -4,6 +4,8 @@ Voxlink streams mono microphone audio from Android to Linux over a trusted local
 
 ## Downloads
 
+Visit the [Voxlink download website](https://mrduhlol.github.io/Voxlink/) for the latest app downloads and setup steps.
+
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk"><img alt="Download Android APK" src="https://img.shields.io/badge/Download-Android_APK-3DDC84?logo=android&logoColor=white"></a>
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz"><img alt="Download Linux receiver" src="https://img.shields.io/badge/Download-Linux_x86__64-0078D4?logo=linux&logoColor=white"></a>
 <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage"><img alt="Download Omarchy desktop app" src="https://img.shields.io/badge/Download-Omarchy_AppImage-8A2BE2?logo=linux&logoColor=white"></a>
