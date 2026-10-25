@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Voxlink - Stream microphone audio from Android to Linux over local Wi-Fi. Create a virtual microphone for Discord, OBS, and browsers, or record to WAV.">
+  <meta name="theme-color" content="#3DDC84">
+  <title>Voxlink — Android mic to Linux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <script src="script.js" defer></script>
+  <header class="header">
+    <div class="container header-inner">
+      <a href="#" class="logo" aria-label="Voxlink home">
+        <svg class="logo-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="currentColor"/>
+          <path d="M16 8C11.5817 8 8 11.5817 8 16C8 20.4183 11.5817 24 16 24C20.4183 24 24 20.4183 24 16C24 11.5817 20.4183 8 16 8ZM16 22C12.6863 22 10 19.3137 10 16C10 12.6863 12.6863 10 16 10C19.3137 10 22 12.6863 22 16C22 19.3137 19.3137 22 16 22Z" fill="white"/>
+          <path d="M16 13V19M13 16H19" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="logo-text">Voxlink</span>
+      </a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="#downloads" class="nav-link">Downloads</a>
+        <a href="#install" class="nav-link">Install</a>
+        <a href="https://github.com/mrduhlol/Voxlink" class="nav-link nav-link--github" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container">
+        <h1 id="hero-title" class="hero-title">Stream your Android microphone to Linux</h1>
+        <p class="hero-subtitle">Low-latency audio over local Wi-Fi. Use your phone as a wireless mic for Discord, OBS, browsers — or record to WAV.</p>
+        <div class="hero-badges" aria-label="Supported platforms">
+          <span class="badge badge--android">Android Sender</span>
+          <span class="badge badge--linux">Linux Receiver</span>
+          <span class="badge badge--omarchy">Omarchy Desktop</span>
+        </div>
+        <div class="hero-cta">
+          <a href="#downloads" class="btn btn--primary btn--large">Get Voxlink</a>
+          <a href="#install" class="btn btn--secondary btn--large">Installation guide</a>
+        </div>
+        <p class="hero-note">v0.2.0 • Open source • Trusted local network only</p>
+      </div>
+    </section>
+
+    <section id="downloads" class="downloads" aria-labelledby="downloads-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="downloads-title" class="section-title">Downloads</h2>
+          <p class="section-subtitle">Prebuilt binaries from the latest release</p>
+        </header>
+
+        <div class="download-grid">
+          <article class="download-card download-card--android">
+            <div class="download-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 0h12a6 6 0 0 1 6 6v12a6 6 0 0 1-6 6H6a6 6 0 0 1-6-6V6a6 6 0 0 1 6-6zm0 2a4 4 0 0 0-4 4v12a4 4 0 0 0 4 4h12a4 4 0 0 0 4-4V6a4 4 0 0 0-4-4H6z"/></svg>
+            </div>
+            <h3 class="download-title">Android Sender</h3>
+            <p class="download-desc">Install on your phone to capture and stream microphone audio.</p>
+            <ul class="download-features">
+              <li>Mute / gain / noise gate controls</li>
+              <li>48/44.1 kHz sample rate selection</li>
+              <li>Saved computer profiles (up to 10)</li>
+              <li>Session stats & connection tools</li>
+            </ul>
+            <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk" class="btn btn--block btn--android" download>
+              Download APK (debug)
+            </a>
+            <p class="download-note">Debug APK — allow "Install unknown apps" when prompted</p>
+          </article>
+
+          <article class="download-card download-card--linux">
+            <div class="download-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4z"/><path d="M12 17v-6"/><path d="M9 14h6"/></svg>
+            </div>
+            <h3 class="download-title">Linux Receiver (WAV)</h3>
+            <p class="download-desc">Standalone CLI tool that saves the incoming stream to a WAV file.</p>
+            <ul class="download-features">
+              <li>x86_64 prebuilt binary</li>
+              <li>Packet loss reporting</li>
+              <li>No PipeWire/PulseAudio required</li>
+              <li>Build from source on Windows/macOS</li>
+            </ul>
+            <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/voxlink-receiver-linux-x86_64.tar.gz" class="btn btn--block btn--linux" download>
+              Download Linux x86_64
+            </a>
+            <p class="download-note">Extract and run: <code>tar -xzf voxlink-receiver-linux-x86_64.tar.gz</code></p>
+          </article>
+
+          <article class="download-card download-card--omarchy">
+            <div class="download-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h6z"/><path d="M12 10v8"/><path d="M8 14h8"/></svg>
+            </div>
+            <h3 class="download-title">Omarchy Desktop App</h3>
+            <p class="download-desc">Tauri app that creates a virtual PipeWire microphone for real-time use in any app.</p>
+            <ul class="download-features">
+              <li>Virtual microphone for Discord, OBS, browsers</li>
+              <li>Live level meter & packet loss</li>
+              <li>Add to app menu (no sudo)</li>
+              <li>AppImage — runs anywhere</li>
+            </ul>
+            <a href="https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage" class="btn btn--block btn--omarchy" download>
+              Download AppImage
+            </a>
+            <p class="download-note">Make executable: <code>chmod +x Voxlink_0.2.0_amd64.AppImage</code></p>
+          </article>
+        </div>
+
+        <div class="download-footer">
+          <p>All downloads served from <a href="https://github.com/mrduhlol/Voxlink/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> · <a href="https://github.com/mrduhlol/Voxlink/actions/workflows/release.yml" target="_blank" rel="noopener">Build workflow</a></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="install" aria-labelledby="install-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="install-title" class="section-title">Quick start</h2>
+          <p class="section-subtitle">Three steps to your first stream</p>
+        </header>
+
+        <div class="steps">
+          <article class="step">
+            <span class="step-number" aria-hidden="true">1</span>
+            <div class="step-content">
+              <h3 class="step-title">Start the receiver</h3>
+              <p class="step-desc">On your Linux computer, launch the receiver or desktop app first. Find your Wi-Fi IP:</p>
+              <pre class="step-code"><code>ip -brief address</code></pre>
+              <p class="step-desc">Use the Wi-Fi interface address (e.g., <code>192.168.1.20</code>) and port <code>4950</code>.</p>
+            </div>
+          </article>
+
+          <article class="step">
+            <span class="step-number" aria-hidden="true">2</span>
+            <div class="step-content">
+              <h3 class="step-title">Configure the phone</h3>
+              <p class="step-desc">Open Voxlink on Android. Enter the computer's Wi-Fi IP and port <code>4950</code>. Tap <strong>Start</strong> and grant microphone permission.</p>
+            </div>
+          </article>
+
+          <article class="step">
+            <span class="step-number" aria-hidden="true">3</span>
+            <div class="step-content">
+              <h3 class="step-title">Select the mic</h3>
+              <p class="step-desc">In Discord, OBS, or your browser, choose <strong>Voxlink Microphone</strong> as input. Speak — the level meter should move. Tap <strong>Stop</strong> when done.</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="install-note">
+          <h3>Requirements</h3>
+          <ul>
+            <li>Both devices on the same trusted Wi-Fi (no client/AP isolation)</li>
+            <li>UDP port 4950 allowed through firewall on private network only</li>
+            <li>PipeWire + PulseAudio compat for the desktop app (<code>pactl info</code> should work)</li>
+            <li>Keep the Android app in the foreground while streaming</li>
+          </ul>
+          <p><strong>No encryption or authentication.</strong> Use only on trusted local networks. Never forward port 4950 to the public internet.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="features" aria-labelledby="features-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="features-title" class="section-title">Features</h2>
+        </header>
+        <div class="features-grid">
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v20M17 5H7"/></svg>
+            </div>
+            <h3>Real-time streaming</h3>
+            <p>UDP streaming with ~20ms latency on typical home Wi-Fi. Mono PCM at 48 or 44.1 kHz.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            </div>
+            <h3>Audio controls</h3>
+            <p>Mute, gain (0–200%), noise gate, sample rate selection — all on the phone.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+            </div>
+            <h3>Virtual microphone</h3>
+            <p>Omarchy app creates a PipeWire source — works in any app without config.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </div>
+            <h3>Session stats</h3>
+            <p>Elapsed time, packets sent, bytes transmitted — visible on the sender.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            </div>
+            <h3>Saved profiles</h3>
+            <p>Store up to 10 computer addresses. Restore with one tap while stopped.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            </div>
+            <h3>Keep awake</h3>
+            <p>Prevent screen sleep during streaming. Background capture not supported.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="tech" aria-labelledby="tech-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="tech-title" class="section-title">Technical details</h2>
+        </header>
+        <div class="tech-grid">
+          <article class="tech-card">
+            <h3>Protocol</h3>
+            <p>UDP datagrams with 12-byte header: <code>VXL1</code> magic + sequence (u32 BE) + sample rate (u32 BE) + PCM16 LE mono payload.</p>
+          </article>
+          <article class="tech-card">
+            <h3>Packet loss</h3>
+            <p>Receiver reports sequence gaps. Missing packets leave silence — no reconstruction.</p>
+          </article>
+          <article class="tech-card">
+            <h3>Android sender</h3>
+            <p>Kotlin + AudioRecord. Tries 48 kHz, falls back to 44.1 kHz. Foreground service not yet implemented.</p>
+          </article>
+          <article class="tech-card">
+            <h3>Desktop app</h3>
+            <p>Tauri 2 + React + PipeWire/PulseAudio module loading. Creates temporary <code>voxlink_mic</code> source.</p>
+          </article>
+          <article class="tech-card">
+            <h3>CLI receiver</h3>
+            <p>Rust + <code>socket2</code> + <code>hound</code> for WAV writing. Cross-platform, no deps on audio stack.</p>
+          </article>
+          <article class="tech-card">
+            <h3>License</h3>
+            <p>MIT — see <a href="https://github.com/mrduhlol/Voxlink/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a> in the repository.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p class="footer-copy">Voxlink v0.2.0 — <a href="https://github.com/mrduhlol/Voxlink" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/mrduhlol/Voxlink/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></p>
+      <p class="footer-warning">Not encrypted. Not authenticated. Trusted local Wi-Fi only.</p>
+    </div>
+  </footer>
+</body>
+</html>
