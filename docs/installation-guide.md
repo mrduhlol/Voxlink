@@ -7,6 +7,23 @@ This guide walks through installing the Android sender and setting up a receivin
 
 There is no iPhone app or Windows virtual-microphone app in this version. Keep the phone and receiving computer on the same trusted Wi-Fi network. The UDP stream is not encrypted or authenticated; do not expose port `4950` to the public internet.
 
+## Connect your phone to the desktop
+
+1. Connect both devices to the same trusted Wi-Fi network.
+2. On the PC, choose its **PC Wi-Fi address**, leave **Phone IP address** empty, and click **Start listening**.
+3. On Android, tap **Find my computer**. If several PCs appear, choose the one whose pairing code matches the desktop. Or tap **Scan QR** and scan the desktop's QR code; camera permission is only needed for scanning.
+4. Tap **Start streaming**, allow microphone access, and select **Voxlink Microphone** in your call or recording app.
+
+If discovery cannot find the PC, enter the PC's Wi-Fi IPv4 address, audio port (default `4950`), and six-digit pairing code manually on the phone. `localhost` and `127.0.0.1` refer to the phone itself, not the PC. You no longer need to find the phone's IP address for normal setup.
+
+The PC keeps the same pairing code across launches. To change it, stop listening and click **Refresh code**. Reconnect the phone using Find, QR, or the new code. Discovery uses UDP `4951`; audio uses UDP `4950` by default. Allow both on your trusted LAN, and check guest-network/client isolation if neither Find nor QR connects. Port `4951` is reserved for discovery.
+
+### Manual IP lock and legacy receiver
+
+To restrict the desktop to a known phone, enter its private Wi-Fi IPv4 address in **Phone IP address** before starting. The phone's Connection tools can display that address. Audio from every other address is filtered. For this mode, or the standalone WAV receiver, enter the PC address and audio port on Android and leave the pairing code empty. The standalone receiver has no discovery or QR support.
+
+Pairing selects an allowed source IP; it is not cryptographic authentication. Discovery exposes the code on the LAN, and audio is unencrypted. Use a trusted network and do not forward either UDP port to the internet.
+
 ## 1. Install Voxlink on an Android phone
 
 1. On the phone, open the [latest Voxlink release](https://github.com/mrduhlol/Voxlink/releases/latest) and download **Voxlink-android-debug.apk**. You can also use the [direct APK download](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink-android-debug.apk).
@@ -26,7 +43,7 @@ The studio interface and controls are available in the Android APK artifact from
 - **Noise gate** silences audio blocks below the chosen input threshold. The minimum slider position turns it off. Raise it gently to avoid cutting off quiet speech.
 - **Sample rate** chooses 48 or 44.1 kHz before streaming. If the microphone cannot use that rate, Voxlink tries the other one; the monitor displays the actual rate.
 - **Keep screen awake** prevents the display sleeping while streaming. Leaving the app stops recording; background streaming is not supported.
-- **Connection tools** lists local IPv4 addresses by interface and lets you refresh or copy them. Use the Wi-Fi address in the desktop app's Phone IP field, avoiding VPN/mobile interfaces.
+- **Connection tools** lists local IPv4 addresses by interface and lets you refresh or copy them. These addresses are only needed for the optional manual Phone IP lock; normal setup uses Find or QR.
 - **Save this computer** stores the current destination and port. **Choose saved computer** restores one while stopped. Up to ten recent destinations are kept.
 - **Session statistics** shows elapsed time, packets, and network bytes sent, including packet headers. These counts do not confirm receiver delivery; check the desktop diagnostics for that.
 - **Setup & troubleshooting** provides connection instructions inside the app.
@@ -141,7 +158,7 @@ Use this option to select the phone as a microphone in Linux applications. The d
 
 6. After installation, press the **Super** key, search for **Voxlink**, and open it from the app menu. The downloaded copy can be deleted after the first launch because Voxlink installed its own copy under `~/Applications`.
 
-7. In Voxlink, enter the PC's private Wi-Fi IPv4 address in **PC Wi-Fi address**. Find it with `ip -brief address`. Enter the phone's Wi-Fi IPv4 address in **Phone IP address** and leave the port at `4950`, unless you changed the sender port. Click **Start listening**, then start the Android sender. Voxlink changes from Connecting to Connected after a valid packet arrives; its level meter should move when you speak.
+7. In Voxlink, enter the PC's private Wi-Fi IPv4 address in **PC Wi-Fi address**. Find it with `ip -brief address`. Leave **Phone IP address** empty and keep port `4950`, unless you changed the audio port. Click **Start listening**, then tap **Find my computer** or **Scan QR** on Android, followed by **Start streaming**. Voxlink changes from Connecting to Connected after a valid packet arrives; its level meter should move when you speak.
 
    In Discord, OBS, a browser, or another audio application, select **Voxlink Microphone** as the input. If the app was already open before the source appeared, reopen its audio-device list. Click **Stop** in Voxlink when done; the temporary input is removed.
 

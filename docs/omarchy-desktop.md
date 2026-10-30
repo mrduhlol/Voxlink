@@ -13,7 +13,7 @@ Each Android datagram has a 12-byte header followed by mono signed 16-bit little
 | 8 | 4 | Sample rate in Hz, unsigned big-endian |
 | 12 | remaining | PCM16 mono samples, little-endian |
 
-The desktop binds only to the chosen PC Wi-Fi IPv4 and accepts packets only from the configured private phone IPv4. Invalid packets and out-of-order sequence numbers are dropped and counted. A bounded queue keeps the network reader independent from audio playback; overflow is counted in diagnostics.
+The desktop binds audio only to the chosen PC Wi-Fi IPv4. With Phone IP empty it accepts audio from the phone that claims the pairing code; an optional private Phone IP locks audio to that address. Invalid packets and out-of-order sequence numbers are dropped and counted. A bounded queue keeps the network reader independent from audio playback; overflow is counted in diagnostics.
 
 ## PipeWire microphone route
 
@@ -72,21 +72,28 @@ npm run tauri -- build
 
 Tauri writes the AppImage under `desktop/src-tauri/target/release/bundle/appimage/`. Launch the `.AppImage` it produces from the file manager or terminal. It runs as the current user and uses that user's PipeWire/PulseAudio session.
 
-To connect a phone:
+## Connect your phone to the desktop
 
-1. On the PC, get its Wi-Fi address with `ip -brief address` and enter that address as **PC Wi-Fi address**.
-2. Enter the phone's Wi-Fi IPv4 address as **Phone IP address**. Both addresses must be on the same trusted LAN.
-3. Keep UDP port `4950` unless the Android sender is configured with a different port. If a firewall is enabled, allow UDP `4950` from the trusted LAN only.
-4. Click **Start listening**, then start the Android sender. Voxlink reports Connecting while waiting and Connected only after a valid packet arrives.
-5. Choose **Voxlink Microphone** in Discord, OBS, or the browser's microphone selector. Speak into the phone and verify that the live input meter moves.
-6. Click **Stop** when finished; Voxlink removes the temporary input source.
+1. Connect both devices to the same trusted Wi-Fi network.
+2. On the PC, choose its **PC Wi-Fi address**, leave **Phone IP address** empty, and click **Start listening**.
+3. On Android, tap **Find my computer**. If several PCs appear, choose the one whose pairing code matches the desktop. Or tap **Scan QR** and scan the desktop's QR code; camera permission is only needed for scanning.
+4. Tap **Start streaming**, allow microphone access, and select **Voxlink Microphone** in your call or recording app.
 
-The Android sender currently sends 48 kHz mono PCM when available and falls back to 44.1 kHz. The desktop uses the packet's declared sample rate.
+If discovery cannot find the PC, enter the PC's Wi-Fi IPv4 address, audio port (default `4950`), and six-digit pairing code manually on the phone. `localhost` and `127.0.0.1` refer to the phone itself, not the PC. You no longer need to find the phone's IP address for normal setup.
+
+The PC keeps the same pairing code across launches. To change it, stop listening and click **Refresh code**. Reconnect the phone using Find, QR, or the new code. Discovery uses UDP `4951`; audio uses UDP `4950` by default. Allow both on your trusted LAN, and check guest-network/client isolation if neither Find nor QR connects. Port `4951` is reserved for discovery.
+
+### Manual IP lock and legacy receiver
+
+To restrict the desktop to a known phone, enter its private Wi-Fi IPv4 address in **Phone IP address** before starting. The phone's Connection tools can display that address. Audio from every other address is filtered. For this mode, or the standalone WAV receiver, enter the PC address and audio port on Android and leave the pairing code empty. The standalone receiver has no discovery or QR support.
+
+Pairing selects an allowed source IP; it is not cryptographic authentication. Discovery exposes the code on the LAN, and audio is unencrypted. Use a trusted network and do not forward either UDP port to the internet.
+
 
 ## Diagnostics and troubleshooting
 
 - **No Wi-Fi address appears:** check `ip -brief address`; choose the private IPv4 on the active Wi-Fi interface. Do not bind to `127.0.0.1` or a public address.
-- **Connecting, but no packets arrive:** confirm both devices are on the same Wi-Fi, the phone IP matches exactly, the Android app is running in the foreground, and UDP `4950` is allowed on the trusted LAN. Voxlink filters packets from all other source addresses.
+- **Connecting, but no packets arrive:** confirm both devices are on the same Wi-Fi, the Android app is in the foreground, and UDP `4950` and `4951` are allowed on the trusted LAN. In auto mode, use Find or QR again to refresh a stale pairing code. In manual mode, verify the phone IP matches exactly.
 - **Virtual microphone unavailable:** run `pactl info` and ensure `pipewire-pulse` is active. Install the `libpulse`/PipeWire packages above and restart the user services if needed. Inspect `pactl list short sinks` and `pactl list short sources`.
 - **Source is missing from an application:** start Voxlink first, then reopen the application's device selector. The source is named `Voxlink Microphone` and the PulseAudio source is `voxlink_mic.monitor`.
 - **No meter activity or crackling:** inspect packet loss and audio queue drops in Voxlink. Move both devices closer to the Wi-Fi access point, avoid congested networks, and close applications that compete for audio. Restart the listener after correcting the network or audio service.
@@ -103,7 +110,7 @@ Speak into the phone for a few seconds, stop `parec` with Ctrl+C, and check that
 
 ## Privacy and network scope
 
-Audio processing stays on the PC and local network. The current UDP prototype has no authentication or encryption. Anyone who can spoof the configured phone IP on the trusted LAN may send audio packets; do not expose UDP port `4950` to the public internet or an untrusted network. Voxlink validates packet structure and filters by the configured phone IP, but this is not cryptographic protection.
+Audio processing stays on the PC and local network. Pairing authorizes a source IP and discovery reveals the code on the LAN; it is not cryptographic authentication. Audio has no encryption. Anyone who can spoof the allowed phone IP may send packets. Do not expose UDP ports `4950` or `4951` to the public internet or an untrusted network.
 
 ## Development checks
 
@@ -116,4 +123,4 @@ cargo test --locked --manifest-path receiver/Cargo.toml
 cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml
 ```
 
-The Rust tests cover packet parsing and level calculations. A hardware test still needs an Android phone on the same Wi-Fi and an application such as OBS to verify actual microphone selection and capture.
+The Rust tests cover pairing packet formats, code persistence, authorization, live UDP discovery and audio filtering, configuration validation, packet parsing, and level calculations. A hardware test still needs an Android phone on the same Wi-Fi and an application such as OBS to verify actual microphone selection and capture.

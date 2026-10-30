@@ -199,3 +199,13 @@ h1 span { color: var(--green); }
   .timeout-control input { width: 58px; }
   .footer { align-items: flex-start; flex-direction: column; gap: 9px; }
 }
+
+.pairing-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 0; margin-top: 12px; border-top: 1px solid var(--line); }
+.pairing-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; }
+.pairing-copy h3, .pairing-copy p { margin: 0; }
+.pairing-copy p, .pairing-copy small, .pairing-code-label { color: var(--soft); font-size: 13px; line-height: 1.5; }
+.pairing-code { font-family: var(--mono); font-size: 32px; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.pairing-qr { flex-shrink: 0; border-radius: 8px; }
+@media (max-width: 580px) { .pairing-card { align-items: flex-start; flex-direction: column; } }
+
+.pairing-copy p[role="alert"] { color: var(--red); }

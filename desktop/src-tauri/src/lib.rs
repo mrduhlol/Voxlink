@@ -1,7 +1,9 @@
+mod pairing;
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use if_addrs::get_if_addrs;
 use libpulse_binding as pulse;
 use libpulse_simple_binding::Simple as PulseSimple;
+use pairing::{AuthGate, DiscoveryPacket, DISCOVERY_PORT, WAITING_FOR_PHONE};
 use pulse::sample::{Format, Spec};
 use pulse::stream::Direction;
 use serde::{Deserialize, Serialize};
@@ -63,6 +65,7 @@ struct StatusView {
     last_packet_ago_ms: Option<u64>,
     error: Option<String>,
     recovery: Option<String>,
+    pairing_code: String,
 }
 
 #[derive(Default)]
@@ -95,6 +98,7 @@ struct DesktopState {
 struct RuntimeHandles {
     stop: Option<Arc<AtomicBool>>,
     receiver_thread: Option<JoinHandle<()>>,
+    discovery_thread: Option<JoinHandle<()>>,
     audio_sender: Option<Sender<AudioFrame>>,
     audio_thread: Option<JoinHandle<()>>,
     module_id: Option<String>,
@@ -230,20 +234,32 @@ fn unload_virtual_sink(sink: &VirtualSink) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_config(config: &StartConfig) -> Result<(Ipv4Addr, Ipv4Addr), String> {
+fn validate_config(config: &StartConfig) -> Result<(Ipv4Addr, Option<Ipv4Addr>), String> {
     let bind_ip = config
         .bind_ip
         .parse::<Ipv4Addr>()
         .map_err(|_| "Enter a valid PC Wi-Fi IPv4 address.".to_string())?;
-    let phone_ip = config
-        .phone_ip
-        .parse::<Ipv4Addr>()
-        .map_err(|_| "Enter a valid phone IPv4 address.".to_string())?;
+    let phone_ip = if config.phone_ip.trim().is_empty() {
+        None
+    } else {
+        Some(
+            config
+                .phone_ip
+                .trim()
+                .parse::<Ipv4Addr>()
+                .map_err(|_| "Enter a valid phone IPv4 address.".to_string())?,
+        )
+    };
     if !bind_ip.is_private() || bind_ip.is_loopback() || bind_ip.is_unspecified() {
         return Err("Bind to a private Wi-Fi/LAN IPv4 address on this PC.".to_string());
     }
-    if !phone_ip.is_private() || phone_ip.is_loopback() || phone_ip.is_unspecified() {
+    if phone_ip.is_some_and(|ip| !ip.is_private() || ip.is_loopback() || ip.is_unspecified()) {
         return Err("The phone address must be a private LAN IPv4 address.".to_string());
+    }
+    if config.port == DISCOVERY_PORT {
+        return Err(
+            "Port 4951 is reserved for discovery — pick another UDP port for audio.".into(),
+        );
     }
     if config.port < 1024 {
         return Err(
@@ -391,6 +407,93 @@ fn install_appimage_launcher() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_pairing_uri(
+    state: State<'_, DesktopState>,
+    bind_ip: String,
+    port: u16,
+) -> Result<String, String> {
+    pairing::pairing_uri(
+        &bind_ip,
+        port,
+        &lock_status(&state.status).view.pairing_code,
+    )
+}
+
+#[tauri::command]
+fn refresh_pairing_code(state: State<'_, DesktopState>) -> Result<String, String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "Voxlink runtime state is unavailable.")?;
+    if runtime.receiver_thread.is_some() {
+        return Err("Stop listening before refreshing the pairing code.".into());
+    }
+    let code = pairing::generate_code();
+    if let Err(error) = pairing::save_code(&pairing::code_path(), &code) {
+        warn!(%error, "Could not save pairing code");
+    }
+    lock_status(&state.status).view.pairing_code = code.clone();
+    Ok(code)
+}
+
+fn bind_discovery_socket_on(port: u16) -> Result<UdpSocket, String> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AddrInUse {
+            format!("UDP port {port} is already in use — another Voxlink may be running.")
+        } else {
+            format!("Could not listen for discovery on UDP port {port}: {error}")
+        }
+    })?;
+    socket
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .map_err(|e| e.to_string())?;
+    Ok(socket)
+}
+
+fn run_discovery_responder(
+    socket: UdpSocket,
+    audio_port: u16,
+    code: String,
+    auth: Arc<Mutex<AuthGate>>,
+    stop: Arc<AtomicBool>,
+) {
+    let mut buffer = [0u8; 1024];
+    while !stop.load(Ordering::Relaxed) {
+        match socket.recv_from(&mut buffer) {
+            Ok((length, peer)) => {
+                let IpAddr::V4(source) = peer.ip() else {
+                    continue;
+                };
+                match pairing::parse_discovery(&buffer[..length]) {
+                    DiscoveryPacket::Probe => {
+                        let _ = socket.send_to(&pairing::encode_reply(&code, audio_port), peer);
+                    }
+                    DiscoveryPacket::Claim { code: claim } => {
+                        if auth
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .claim(source, claim, &code)
+                        {
+                            let _ = socket.send_to(&pairing::encode_ack(), peer);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => {
+                warn!(%error, "Discovery listener stopped");
+                break;
+            }
+        }
+    }
+}
+
+#[tauri::command]
 fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(), String> {
     let (bind_ip, phone_ip) = validate_config(&config).map_err(|error| {
         set_start_error(
@@ -415,6 +518,7 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
             connection: ConnectionState::Connecting,
             virtual_microphone: MicrophoneState::Stopped,
             port: config.port,
+            pairing_code: shared.view.pairing_code.clone(),
             ..StatusView::default()
         };
         shared.last_packet_at = None;
@@ -456,6 +560,19 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
         return Err(message);
     }
 
+    let discovery = match bind_discovery_socket_on(DISCOVERY_PORT) {
+        Ok(socket) => socket,
+        Err(message) => {
+            let _ = unload_virtual_sink(&sink);
+            set_start_error(
+                &state.status,
+                message.clone(),
+                "Stop the other Voxlink listener and retry.".into(),
+            );
+            return Err(message);
+        }
+    };
+    let auth = Arc::new(Mutex::new(AuthGate::new(phone_ip)));
     let local_address = socket
         .local_addr()
         .map(|address| address.to_string())
@@ -484,12 +601,13 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
     let audio_for_receiver = audio_sender.clone();
     let status_for_receiver = Arc::clone(&state.status);
     let timeout = Duration::from_millis(config.timeout_ms);
+    let auth_for_receiver = Arc::clone(&auth);
     let receiver_thread = match thread::Builder::new()
         .name("voxlink-udp-receiver".to_string())
         .spawn(move || {
             receive_audio(
                 socket,
-                phone_ip,
+                auth_for_receiver,
                 timeout,
                 stop_for_receiver,
                 audio_for_receiver,
@@ -512,21 +630,40 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
         }
     };
 
+    let discovery_stop = Arc::clone(&stop);
+    let code = lock_status(&state.status).view.pairing_code.clone();
+    let discovery_thread = match thread::Builder::new()
+        .name("voxlink-discovery".into())
+        .spawn(move || run_discovery_responder(discovery, config.port, code, auth, discovery_stop))
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            stop.store(true, Ordering::Relaxed);
+            let _ = receiver_thread.join();
+            drop(audio_sender);
+            let _ = audio_thread.join();
+            let _ = unload_virtual_sink(&sink);
+            let message = format!("Could not start discovery: {error}");
+            set_start_error(&state.status, message.clone(), "Restart Voxlink.".into());
+            return Err(message);
+        }
+    };
     {
         let mut shared = lock_status(&state.status);
         shared.view.listening = true;
         shared.view.virtual_microphone = MicrophoneState::Ready;
         shared.view.virtual_source = Some(VIRTUAL_SOURCE.to_string());
         shared.view.bind_address = Some(local_address.clone());
-        shared.view.phone_address = Some(phone_ip.to_string());
+        shared.view.phone_address = phone_ip.map(|ip| ip.to_string());
         shared.view.port = config.port;
         shared.view.error = None;
-        shared.view.recovery = None;
+        shared.view.recovery = phone_ip.is_none().then(|| WAITING_FOR_PHONE.to_string());
     }
-    info!(%local_address, %phone_ip, port = config.port, source = VIRTUAL_SOURCE, "Voxlink listener started");
+    info!(%local_address, ?phone_ip, port = config.port, source = VIRTUAL_SOURCE, "Voxlink listener started");
 
     runtime.stop = Some(stop);
     runtime.receiver_thread = Some(receiver_thread);
+    runtime.discovery_thread = Some(discovery_thread);
     runtime.audio_sender = Some(audio_sender);
     runtime.audio_thread = Some(audio_thread);
     runtime.module_id = sink.module_id;
@@ -560,6 +697,9 @@ fn stop_runtime(state: &DesktopState) -> Result<(), String> {
         shared.last_packet_at = None;
     }
 
+    if let Some(discovery) = handles.discovery_thread {
+        let _ = discovery.join();
+    }
     if let Some(receiver) = handles.receiver_thread {
         if receiver.join().is_err() {
             warn!("UDP receiver thread panicked during shutdown");
@@ -687,7 +827,7 @@ fn set_audio_error(status: &Arc<Mutex<SharedStatus>>, message: String) {
 
 fn receive_audio(
     socket: UdpSocket,
-    expected_phone: Ipv4Addr,
+    auth: Arc<Mutex<AuthGate>>,
     timeout: Duration,
     stop: Arc<AtomicBool>,
     audio_sender: Sender<AudioFrame>,
@@ -695,15 +835,33 @@ fn receive_audio(
 ) {
     let start_time = Instant::now();
     let mut ever_connected = false;
+    let mut reported_unauthorized = false;
+    let mut previous_source = None;
     let mut expected_sequence: Option<u32> = None;
     let mut buffer = [0u8; UDP_BUFFER_SIZE];
 
     while !stop.load(Ordering::Relaxed) {
         match socket.recv_from(&mut buffer) {
             Ok((length, peer)) => {
-                if peer.ip() != IpAddr::V4(expected_phone) {
-                    lock_status(&status).view.packets_filtered += 1;
+                let IpAddr::V4(source) = peer.ip() else {
                     continue;
+                };
+                if !auth
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .allows(source)
+                {
+                    let mut shared = lock_status(&status);
+                    shared.view.packets_filtered += 1;
+                    if !reported_unauthorized {
+                        shared.view.recovery = Some(pairing::unauthorized_sender_message(source));
+                        reported_unauthorized = true;
+                    }
+                    continue;
+                }
+                if previous_source != Some(source) {
+                    expected_sequence = None;
+                    previous_source = Some(source);
                 }
                 let packet = match AudioPacket::parse(&buffer[..length]) {
                     Ok(packet) => packet,
@@ -732,6 +890,10 @@ fn receive_audio(
                 {
                     let mut shared = lock_status(&status);
                     shared.view.connection = ConnectionState::Connected;
+                    shared.view.phone_address = Some(source.to_string());
+                    if shared.view.error.is_none() {
+                        shared.view.recovery = None;
+                    }
                     shared.view.sample_rate = Some(packet.sample_rate);
                     shared.view.packets_received += 1;
                     shared.view.input_level = rms;
@@ -812,10 +974,16 @@ pub fn run() {
         .with_target(false)
         .init();
 
+    let state = DesktopState::default();
+    lock_status(&state.status).view.pairing_code =
+        pairing::load_or_create_code(&pairing::code_path())
+            .unwrap_or_else(|_| pairing::generate_code());
     tauri::Builder::default()
-        .manage(DesktopState::default())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_local_addresses,
+            get_pairing_uri,
+            refresh_pairing_code,
             get_status,
             get_appimage_install_state,
             install_appimage_launcher,
@@ -851,5 +1019,120 @@ mod tests {
         let (rms, peak_dbfs) = pcm_levels(&[0xff, 0x7f, 0x00, 0x80]);
         assert!((rms - 1.0).abs() < 0.00002);
         assert_eq!(peak_dbfs, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod pairing_integration_tests {
+    use super::*;
+    fn config(phone: &str, port: u16) -> StartConfig {
+        StartConfig {
+            bind_ip: "192.168.1.5".into(),
+            phone_ip: phone.into(),
+            port,
+            timeout_ms: 2500,
+        }
+    }
+    fn socket() -> UdpSocket {
+        let s = UdpSocket::bind("127.0.0.1:0").unwrap();
+        s.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        s
+    }
+    fn wait_until(mut condition: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !condition() {
+            assert!(Instant::now() < deadline, "condition timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    #[test]
+    fn auto_mode_and_private_pin_validation() {
+        assert_eq!(validate_config(&config("  ", 4950)).unwrap().1, None);
+        assert_eq!(
+            validate_config(&config("192.168.1.42", 65535)).unwrap().1,
+            Some(Ipv4Addr::new(192, 168, 1, 42))
+        );
+        for host in ["localhost", "8.8.8.8", "0.0.0.0"] {
+            assert!(validate_config(&config(host, 4950)).is_err());
+        }
+        assert!(validate_config(&config("", 1023)).is_err());
+        assert_eq!(
+            validate_config(&config("", 4951)).unwrap_err(),
+            "Port 4951 is reserved for discovery — pick another UDP port for audio."
+        );
+    }
+    #[test]
+    fn discovery_probe_claim_and_stop() {
+        let responder = socket();
+        let address = responder.local_addr().unwrap();
+        let auth = Arc::new(Mutex::new(AuthGate::new(None)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (a, s) = (auth.clone(), stop.clone());
+        let handle =
+            thread::spawn(move || run_discovery_responder(responder, 4950, "482913".into(), a, s));
+        let client = socket();
+        let mut buffer = [0; 32];
+        for _ in 0..2 {
+            client.send_to(b"VXLD", address).unwrap();
+            let (n, _) = client.recv_from(&mut buffer).unwrap();
+            assert_eq!(&buffer[..n], &pairing::encode_reply("482913", 4950));
+        }
+        for bytes in [b"VXLC000000".as_slice(), b"NOPE", b"VXL1"] {
+            client.send_to(bytes, address).unwrap();
+            assert!(client.recv_from(&mut buffer).is_err());
+            assert!(!auth.lock().unwrap().allows(Ipv4Addr::LOCALHOST));
+        }
+        client.send_to(b"VXLC482913", address).unwrap();
+        let (n, _) = client.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..n], b"VXLA");
+        assert!(auth.lock().unwrap().allows(Ipv4Addr::LOCALHOST));
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
+    #[test]
+    fn discovery_port_conflicts_report_a_useful_error() {
+        let held = UdpSocket::bind("0.0.0.0:0").unwrap();
+        assert!(bind_discovery_socket_on(held.local_addr().unwrap().port())
+            .unwrap_err()
+            .contains("already in use"));
+    }
+    #[test]
+    fn unauthorized_audio_is_filtered_until_claimed() {
+        let listener = socket();
+        let address = listener.local_addr().unwrap();
+        let auth = Arc::new(Mutex::new(AuthGate::new(None)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let status = Arc::new(Mutex::new(SharedStatus::default()));
+        let (tx, rx) = bounded(10);
+        let (a, s, v) = (auth.clone(), stop.clone(), status.clone());
+        let handle =
+            thread::spawn(move || receive_audio(listener, a, Duration::from_secs(1), s, tx, v));
+        let client = socket();
+        let mut packet = b"VXL1".to_vec();
+        packet.extend(0u32.to_be_bytes());
+        packet.extend(48000u32.to_be_bytes());
+        packet.extend([0, 0]);
+        for n in 1..=3 {
+            client.send_to(&packet, address).unwrap();
+            wait_until(|| lock_status(&status).view.packets_filtered == n);
+            assert_eq!(
+                lock_status(&status).view.recovery.as_deref(),
+                Some(pairing::unauthorized_sender_message(Ipv4Addr::LOCALHOST).as_str())
+            );
+        }
+        assert_eq!(lock_status(&status).view.packets_received, 0);
+        auth.lock()
+            .unwrap()
+            .claim(Ipv4Addr::LOCALHOST, "482913", "482913");
+        client.send_to(&packet, address).unwrap();
+        wait_until(|| lock_status(&status).view.packets_received == 1);
+        assert_eq!(
+            lock_status(&status).view.phone_address.as_deref(),
+            Some("127.0.0.1")
+        );
+        assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
     }
 }

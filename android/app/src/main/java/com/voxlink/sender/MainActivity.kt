@@ -24,6 +24,11 @@ import java.net.InetAddress
 
 class MainActivity : Activity() {
     private lateinit var addressInput: EditText
+    private lateinit var pairingInput: EditText
+    private lateinit var findButton: Button
+    private lateinit var scanButton: Button
+    private var finding = false
+    private var sessionCode = ""
     private lateinit var portInput: EditText
     private lateinit var statusText: TextView
     private lateinit var statusDot: TextView
@@ -168,9 +173,20 @@ class MainActivity : Activity() {
         section(connection, "02", "CONNECTION")
         connection.addView(label("Where should your audio go?", 18f, brightColor, bold = true))
         space(connection, 6)
-        connection.addView(label("Use the PC Wi-Fi address from the desktop app.", 12f))
+        connection.addView(label("Tap Find my computer or scan the QR code on your PC.", 12f))
         space(connection, 18)
         val saved = getPreferences(MODE_PRIVATE)
+        findButton = Button(this).apply {
+            text = "Find my computer"; isAllCaps = false
+            setOnClickListener { findComputer() }
+        }
+        connection.addView(findButton, LinearLayout.LayoutParams(-1, dp(52)))
+        scanButton = Button(this).apply {
+            text = "Scan QR"; isAllCaps = false
+            setOnClickListener { startActivityForResult(android.content.Intent(this@MainActivity, ScannerActivity::class.java), REQUEST_SCAN) }
+        }
+        connection.addView(scanButton, LinearLayout.LayoutParams(-1, dp(52)))
+        space(connection, 12)
         connection.addView(label("COMPUTER IP ADDRESS", 10f, mutedColor, mono = true))
         space(connection, 8)
         addressInput = input(saved.getString("host", "") ?: "", "e.g. 192.168.1.7", false)
@@ -182,6 +198,12 @@ class MainActivity : Activity() {
         portInput = input(saved.getString("port", "4950") ?: "4950", "4950", true)
         portInput.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
         connection.addView(portInput, LinearLayout.LayoutParams(-1, dp(54)))
+        space(connection, 10)
+        connection.addView(label("PAIRING CODE (FROM PC)", 10f, mutedColor, mono = true))
+        space(connection, 8)
+        pairingInput = input(saved.getString("pairingCode", "") ?: "", "Six digits · optional for manual IP lock", true)
+        pairingInput.filters = arrayOf(android.text.InputFilter.LengthFilter(6))
+        connection.addView(pairingInput, LinearLayout.LayoutParams(-1, dp(54)))
         space(connection, 10)
         connection.addView(label("Both devices must be on the same Wi-Fi network.", 11f))
         space(connection, 20)
@@ -365,6 +387,7 @@ class MainActivity : Activity() {
                 else android.app.AlertDialog.Builder(this).setTitle("Saved computers")
                     .setItems(entries) { _, index ->
                         val entry = entries[index]
+                        pairingInput.setText("")
                         addressInput.setText(entry.substringBeforeLast(':'))
                         portInput.setText(entry.substringAfterLast(':'))
                     }.setNegativeButton("Cancel", null).show()
@@ -379,7 +402,7 @@ class MainActivity : Activity() {
         space(controls, 14)
         controls.addView(action("Setup & troubleshooting") {
             android.app.AlertDialog.Builder(this).setTitle("Connect Voxlink")
-                .setMessage("1. Connect your phone and PC to the same Wi-Fi.\n\n2. In the desktop app, choose the PC's current Wi-Fi address. Use this phone's Wi-Fi address in the Phone IP field. Addresses above are labelled by network interface; avoid VPN addresses.\n\n3. Tap Start listening on the desktop.\n\n4. Enter the PC address here with the same UDP port, then start streaming.\n\nCannot assign requested address means the PC address is wrong. No packets may mean a wrong phone address, firewall, or Wi-Fi client isolation.\n\nKeep this app in the foreground. Muting sends silence and keeps the stream open.")
+                .setMessage("1. Connect your phone and PC to the same Wi-Fi.\n\n2. On the PC, select its Wi-Fi address, leave Phone IP empty, and click Start listening.\n\n3. Tap Find my computer here, or Scan QR. The address, port and pairing code fill automatically.\n\n4. Tap Start streaming and allow microphone access.\n\nIf discovery fails, enter the PC Wi-Fi address and six-digit pairing code. Do not use localhost: it points to this phone. Check UDP ports 4950 (audio) and 4951 (discovery), and Wi-Fi client isolation.\n\nFor a legacy receiver or a desktop locked to this phone IP, leave the code empty. Keep Voxlink in the foreground.")
                 .setPositiveButton("Got it", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
         return controls
@@ -412,11 +435,59 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private fun applyTarget(host: String, port: Int, code: String, message: String) {
+        addressInput.setText(host); portInput.setText(port.toString()); pairingInput.setText(code)
+        getPreferences(MODE_PRIVATE).edit().putString("host", host).putString("port", port.toString()).putString("pairingCode", code).apply()
+        setStatus(message, limeColor)
+    }
+
+    private fun findComputer() {
+        if (finding || running || worker?.isAlive == true) return
+        finding = true
+        findButton.isEnabled = false; scanButton.isEnabled = false; startButton.isEnabled = false
+        setStatus("Looking for your PC…", mutedColor)
+        Thread {
+            try {
+                val targets = (listOf("255.255.255.255") + PairingProtocol.localAddresses().mapNotNull { PairingProtocol.subnetBroadcastOf(it) }).distinct()
+                val replies = PairingProtocol.discover(targets).filter { PairingProtocol.validateDestination(it.host) == null }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    fun choose(reply: PairingProtocol.Reply) = applyTarget(reply.host, reply.audioPort, reply.code, "Found PC ${reply.host} · code ${reply.code}")
+                    when (replies.size) {
+                        0 -> setStatus("No PC found. Is Voxlink listening? Same Wi-Fi? Or use Scan QR / enter the address.", mutedColor)
+                        1 -> choose(replies[0])
+                        else -> android.app.AlertDialog.Builder(this).setTitle("Choose your computer")
+                            .setItems(replies.map { "${it.host} — ${it.code}" }.toTypedArray()) { _, index -> choose(replies[index]) }
+                            .setNegativeButton("Cancel", null).show()
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread { if (!isDestroyed) setStatus("Discovery failed: ${error.message}. Try Scan QR or enter the PC address.", mutedColor) }
+            } finally {
+                runOnUiThread { finding = false; findButton.isEnabled = !running; scanButton.isEnabled = !running; startButton.isEnabled = !running }
+            }
+        }.start()
+    }
+
+    @Deprecated("Platform activity result callback")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SCAN && resultCode == RESULT_OK) {
+            val target = PairingProtocol.parsePairingUri(data?.getStringExtra("pairingUri") ?: "")
+            if (target == null) android.widget.Toast.makeText(this, "Not a Voxlink QR code", android.widget.Toast.LENGTH_SHORT).show()
+            else applyTarget(target.host, target.port, target.code, "Scanned PC ${target.host}")
+        }
+    }
+
     private fun requestStart() {
         val address = addressInput.text.toString().trim()
         val port = portInput.text.toString().trim().toIntOrNull()
-        if (address.isEmpty() || port == null || port !in 1..65535) {
-            setStatus("Enter a valid computer IP and UDP port.", Color.rgb(197, 116, 20))
+        val rejection = PairingProtocol.validateDestination(address)
+        if (rejection != null) { setStatus(rejection, Color.rgb(237, 189, 102)); return }
+        val code = pairingInput.text.toString().trim()
+        if (code.isNotEmpty() && !code.matches(Regex("[0-9]{6}"))) { setStatus("Enter the six-digit pairing code shown on the PC.", mutedColor); return }
+        if (port == null || port !in 1024..65535 || port == PairingProtocol.DISCOVERY_PORT) {
+            setStatus("Choose an audio port from 1024 to 65535. Port 4951 is reserved for discovery.", Color.rgb(197, 116, 20))
             return
         }
 
@@ -447,7 +518,9 @@ class MainActivity : Activity() {
 
     private fun startRecording(address: String, port: Int) {
         if (running || worker?.isAlive == true) return
-        getPreferences(MODE_PRIVATE).edit().putString("host", address).putString("port", port.toString()).apply()
+        sessionCode = pairingInput.text.toString().trim()
+        getPreferences(MODE_PRIVATE).edit().putString("host", address).putString("port", port.toString()).putString("pairingCode", sessionCode).apply()
+        pairingInput.isEnabled = false; findButton.isEnabled = false; scanButton.isEnabled = false
         addressInput.isEnabled = false
         portInput.isEnabled = false
         running = true
@@ -475,6 +548,10 @@ class MainActivity : Activity() {
         try {
             val destination = InetAddress.getByName(host)
             if (!running) return
+            val pairingStatus = if (sessionCode.isEmpty()) "Streaming to $host — pair with a code for auto mode."
+                else if (try { PairingProtocol.claimWithAck(host, code = sessionCode) } catch (_: java.io.IOException) { false }) "Paired with $host"
+                else "No pairing ack — is Voxlink listening on the PC?"
+            if (!running) return
             socket = DatagramSocket()
             recorder = createRecorder()
             activeRecorder = recorder
@@ -484,7 +561,7 @@ class MainActivity : Activity() {
             if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
                 throw IOException("Android did not start microphone capture")
             }
-            showStatus("Sending ${recorder.sampleRate} Hz mono audio to $host:$port")
+            showStatus(pairingStatus)
 
             val sampleRate = recorder.sampleRate
             val samples = ShortArray(PACKET_SAMPLES)
@@ -559,6 +636,7 @@ class MainActivity : Activity() {
                 rateButton.isEnabled = true
                 addressInput.isEnabled = true
                 portInput.isEnabled = true
+                pairingInput.isEnabled = true; findButton.isEnabled = !finding; scanButton.isEnabled = !finding
                 startButton.isEnabled = true
                 startButton.alpha = 1f
                 stopButton.isEnabled = false
@@ -610,7 +688,7 @@ class MainActivity : Activity() {
     private fun setStatus(message: String, color: Int) {
         statusText.text = message
         statusDot.setTextColor(color)
-        val active = running && message.startsWith("Sending")
+        val active = running && (message.startsWith("Sending") || message.startsWith("Paired") || message.startsWith("Streaming"))
         val error = message.startsWith("Error") || message.contains("denied") || message.startsWith("Enter")
         liveBadge.text = when { active -> "● SENDING"; error -> "● ERROR"; running -> "● STARTING"; else -> "● STANDBY" }
         liveBadge.setTextColor(if (error) Color.rgb(255, 119, 113) else if (running) limeColor else mutedColor)
@@ -644,6 +722,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val REQUEST_SCAN = 1003
         private const val REQUEST_MICROPHONE = 1001
         private const val PACKET_SAMPLES = 480
         private const val HEADER_SIZE = 12

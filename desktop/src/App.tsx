@@ -1,3 +1,4 @@
+import QRCode from "qrcode";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
 
@@ -23,6 +24,7 @@ type DesktopStatus = {
   lastPacketAgoMs: number | null;
   error: string | null;
   recovery: string | null;
+  pairingCode: string;
 };
 type Settings = { bindIp: string; phoneIp: string; port: string; timeoutMs: number };
 
@@ -45,6 +47,7 @@ const EMPTY_STATUS: DesktopStatus = {
   lastPacketAgoMs: null,
   error: null,
   recovery: null,
+  pairingCode: "",
 };
 
 const DEFAULT_SETTINGS: Settings = { bindIp: "", phoneIp: "", port: "4950", timeoutMs: 2500 };
@@ -85,6 +88,9 @@ function App() {
   const [settings, setSettings] = useState<Settings>(readSavedSettings);
   const [addresses, setAddresses] = useState<LocalAddress[]>([]);
   const [status, setStatus] = useState<DesktopStatus>(EMPTY_STATUS);
+  const [qr, setQr] = useState("");
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [refreshingCode, setRefreshingCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [appImageInstall, setAppImageInstall] = useState<AppImageInstallState>({ available: false, installed: false });
@@ -119,6 +125,29 @@ function App() {
     const timer = window.setInterval(() => void refresh(), 200);
     return () => { mounted = false; window.clearInterval(timer); };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setQr("");
+    setPairingError(null);
+    if (status.listening && status.pairingCode) {
+      void invoke<string>("get_pairing_uri", { bindIp: settings.bindIp.trim(), port: Number(settings.port) })
+        .then((uri) => QRCode.toDataURL(uri, { width: 176, margin: 4 }))
+        .then((url) => { if (!cancelled) setQr(url); })
+        .catch((error) => { if (!cancelled) setPairingError(String(error)); });
+    }
+    return () => { cancelled = true; };
+  }, [status.listening, status.pairingCode, settings.bindIp, settings.port]);
+
+  async function refreshCode() {
+    setRefreshingCode(true);
+    try {
+      const code = await invoke<string>("refresh_pairing_code");
+      setStatus((current) => ({ ...current, pairingCode: code }));
+      setPairingError(null);
+    } catch (error) { setPairingError(String(error)); }
+    finally { setRefreshingCode(false); }
+  }
 
   const active = status.listening;
   const meterWidth = useMemo(() => `${Math.min(100, Math.max(0, status.inputLevel * 100))}%`, [status.inputLevel]);
@@ -169,10 +198,11 @@ function App() {
     }
   }
 
-  const connectionMessage = backendError ?? (status.connection === "connected"
-    ? `Receiving live audio from ${status.phoneAddress ?? "your phone"}.`
-    : active ? "Listening on your Wi-Fi interface. Start the Android sender to connect."
-      : "Start Voxlink to create the virtual microphone and listen for your phone.");
+  const connectionMessage = backendError ?? (active
+    ? settings.phoneIp.trim() ? `Locked to ${settings.phoneIp.trim()}`
+      : status.connection === "connected" ? `Paired ${status.phoneAddress}`
+        : `Pairing code ${status.pairingCode} · waiting for phone`
+    : "Start Voxlink to create the virtual microphone and listen for your phone.");
 
   return (
     <main className="app-shell">
@@ -208,8 +238,21 @@ function App() {
           <div className="panel-heading"><div><span className="eyebrow">01 / CONNECTION</span><h2>Stream setup</h2></div><span className={`mini-state ${active ? "active" : ""}`}><span />{active ? "LISTENER READY" : "IDLE"}</span></div>
           <div className="field-grid">
             <label className="field"><span>PC Wi-Fi address</span><input list="local-address-options" value={settings.bindIp} placeholder="192.168.1.5" disabled={active} onChange={(event) => update("bindIp", event.target.value)} /><datalist id="local-address-options">{addresses.map((address) => <option key={`${address.name}-${address.ip}`} value={address.ip}>{address.name}</option>)}</datalist><small>Bind only to this network interface.</small></label>
-            <label className="field"><span>Phone IP address</span><input value={settings.phoneIp} placeholder="192.168.1.42" disabled={active} inputMode="decimal" onChange={(event) => update("phoneIp", event.target.value)} /><small>Packets from other addresses are ignored.</small></label>
+            <label className="field"><span>Phone IP address (optional)</span><input value={settings.phoneIp} placeholder="Auto-pair" disabled={active} inputMode="decimal" onChange={(event) => update("phoneIp", event.target.value)} /><small>Leave empty to auto-pair (recommended). Set a specific IP only to lock to one known phone.</small></label>
             <label className="field field-port"><span>UDP port</span><input type="number" min="1024" max="65535" value={settings.port} disabled={active} onChange={(event) => update("port", event.target.value)} /><small>Android default: 4950</small></label>
+          </div>
+          <div className="pairing-card" aria-label="Pair your phone">
+            <div className="pairing-copy">
+              <h3>Pair your phone</h3>
+              <p>{active ? "Open Voxlink on your phone. Tap Find my computer or Scan QR." : "Start listening to pair"}</p>
+              <span className="pairing-code-label">Pairing code</span>
+              <strong className="pairing-code">{status.pairingCode || "······"}</strong>
+              <button className="button button-secondary" disabled={active || busy || refreshingCode} onClick={() => void refreshCode()}>{refreshingCode ? "Refreshing…" : "Refresh code"}</button>
+              <small>Same code on every launch — only Refresh changes it.</small>
+              {active && <small>Same Wi-Fi required. If discovery fails, scan the QR code or enter this PC’s address and code.</small>}
+              {pairingError && <p role="alert">{pairingError}</p>}
+            </div>
+            {qr && <img className="pairing-qr" src={qr} width="176" height="176" alt="Scan this QR code with Voxlink on your phone to pair" />}
           </div>
           <div className="control-row"><div className="control-hint"><span className="key-indicator"><Icon name="wifi" size={15} /></span><span>{active ? `Port ${status.port} · ${status.bindAddress ?? settings.bindIp}` : "Start the receiver before the phone sender."}</span></div><div className="controls"><button className="button button-secondary" onClick={() => void stop()} disabled={!active || busy}><span className="stop-square" />Stop</button><button className="button button-primary" onClick={() => void start()} disabled={active || busy}><Icon name="wave" size={17} />{busy ? "Starting…" : "Start listening"}<Icon name="arrow" size={16} /></button></div></div>
         </section>

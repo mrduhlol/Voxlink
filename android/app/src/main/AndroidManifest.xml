@@ -2,12 +2,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:allowBackup="false"
         android:label="Voxlink"
         android:icon="@drawable/voxlink_icon"
         android:roundIcon="@drawable/voxlink_icon"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity android:name=".ScannerActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
