@@ -130,14 +130,14 @@ function App() {
     let cancelled = false;
     setQr("");
     setPairingError(null);
-    if (status.listening && status.pairingCode) {
+    if (status.pairingCode && settings.bindIp.trim()) {
       void invoke<string>("get_pairing_uri", { bindIp: settings.bindIp.trim(), port: Number(settings.port) })
         .then((uri) => QRCode.toDataURL(uri, { width: 176, margin: 4 }))
         .then((url) => { if (!cancelled) setQr(url); })
         .catch((error) => { if (!cancelled) setPairingError(String(error)); });
     }
     return () => { cancelled = true; };
-  }, [status.listening, status.pairingCode, settings.bindIp, settings.port]);
+  }, [status.pairingCode, settings.bindIp, settings.port]);
 
   async function refreshCode() {
     setRefreshingCode(true);
@@ -244,7 +244,7 @@ function App() {
           <div className="pairing-card" aria-label="Pair your phone">
             <div className="pairing-copy">
               <h3>Pair your phone</h3>
-              <p>{active ? "Open Voxlink on your phone. Tap Find my computer or Scan QR." : "Start listening to pair"}</p>
+              <p>{active ? "Open Voxlink on your phone. Tap Find my computer or Scan QR." : "Scan this code with Voxlink on your phone, then start listening before streaming."}</p>
               <span className="pairing-code-label">Pairing code</span>
               <strong className="pairing-code">{status.pairingCode || "······"}</strong>
               <button className="button button-secondary" disabled={active || busy || refreshingCode} onClick={() => void refreshCode()}>{refreshingCode ? "Refreshing…" : "Refresh code"}</button>
@@ -252,7 +252,7 @@ function App() {
               {active && <small>Same Wi-Fi required. If discovery fails, scan the QR code or enter this PC’s address and code.</small>}
               {pairingError && <p role="alert">{pairingError}</p>}
             </div>
-            {qr && <img className="pairing-qr" src={qr} width="176" height="176" alt="Scan this QR code with Voxlink on your phone to pair" />}
+            {qr ? <img className="pairing-qr" src={qr} width="176" height="176" alt="Scan this QR code with Voxlink on your phone to pair" /> : <p className="pairing-placeholder" role="status">{!settings.bindIp.trim() ? "Select your PC Wi-Fi address to show the QR code." : pairingError ? "Correct the PC address or UDP port to show the QR code." : "Preparing pairing QR code…"}</p>}
           </div>
           <div className="control-row"><div className="control-hint"><span className="key-indicator"><Icon name="wifi" size={15} /></span><span>{active ? `Port ${status.port} · ${status.bindAddress ?? settings.bindIp}` : "Start the receiver before the phone sender."}</span></div><div className="controls"><button className="button button-secondary" onClick={() => void stop()} disabled={!active || busy}><span className="stop-square" />Stop</button><button className="button button-primary" onClick={() => void start()} disabled={active || busy}><Icon name="wave" size={17} />{busy ? "Starting…" : "Start listening"}<Icon name="arrow" size={16} /></button></div></div>
         </section>

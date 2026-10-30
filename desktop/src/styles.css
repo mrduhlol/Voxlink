@@ -209,3 +209,5 @@ h1 span { color: var(--green); }
 @media (max-width: 580px) { .pairing-card { align-items: flex-start; flex-direction: column; } }
 
 .pairing-copy p[role="alert"] { color: var(--red); }
+
+.pairing-placeholder { flex: 0 1 176px; color: var(--soft); font-size: 13px; line-height: 1.5; }
