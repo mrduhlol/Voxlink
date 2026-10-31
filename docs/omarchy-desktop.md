@@ -2,7 +2,7 @@
 
 ## What runs where
 
-`desktop/` contains the Tauri 2 + React/TypeScript application. Tauri commands validate the private IPv4 configuration and own the lifecycle of the receiver. The UDP reader runs on its own thread, passes bounded PCM frames to a separate PulseAudio client thread, and reports live counters and levels to the UI. `receiver/src/lib.rs` contains the shared VXL1 packet decoder used by both the desktop app and the original WAV-file receiver.
+`desktop/` contains the Tauri 2 + React/TypeScript application. Tauri commands validate the private IPv4 configuration and own the lifecycle of the receiver. The UDP reader runs on its own thread, passes bounded PCM frames to a separate microphone pipe writer thread, and reports live counters and levels to the UI. `receiver/src/lib.rs` contains the shared VXL1 packet decoder used by both the desktop app and the original WAV-file receiver.
 
 Each Android datagram has a 12-byte header followed by mono signed 16-bit little-endian PCM:
 
@@ -17,9 +17,9 @@ The desktop binds audio only to the chosen PC Wi-Fi IPv4. With Phone IP empty it
 
 ## PipeWire microphone route
 
-Voxlink talks to the user's PulseAudio socket through `pipewire-pulse`. On Start it creates (or reuses) a PulseAudio `module-null-sink` named `voxlink_mic`, then plays the phone PCM into that sink. PipeWire exposes the sink's monitor source as **Voxlink Microphone** (`voxlink_mic.monitor`), which is the selectable input seen by Discord, OBS, browsers, and other PulseAudio clients. Stop closes playback and unloads only the sink module created by Voxlink. It does not edit system audio configuration and does not need root privileges.
+Voxlink uses `pipewire-pulse` to create a real **Voxlink Microphone** input (`voxlink_microphone`) with `module-pipe-source`. The app writes mono PCM to a private, nonblocking FIFO in the user runtime directory. The device is an `Audio/Source`, not a speaker output or speaker monitor. A streaming resampler converts the phone's 44.1 kHz fallback to the microphone's fixed 48 kHz format without losing continuity between packets.
 
-The monitor source exists only while the Voxlink listener is running. Select **Voxlink Microphone** in the target application's input device list. Keep the Voxlink window open while using the source.
+The input exists while the listener is running. Select **Voxlink Microphone** under **Input** in the system audio panel and in Discord, OBS, or your browser. Stop removes the app-owned source and FIFO. The app does not edit system audio configuration or require root privileges.
 
 ## Install the released AppImage
 
@@ -97,15 +97,15 @@ Pairing selects an allowed source IP; it is not cryptographic authentication. Di
 - **No pairing popup on a PC with UFW enabled:** allow both Voxlink UDP ports from your trusted Wi-Fi subnet. For example, if `ip -4 address` shows `192.168.0.108/24` on `wlp2s0`, run `sudo ufw allow in on wlp2s0 from 192.168.0.0/24 to any port 4950:4951 proto udp`. Substitute your own interface and subnet. A blocked discovery port prevents the approval popup; a blocked audio port leaves an approved phone paired without audio.
 - **Connecting, but no packets arrive:** confirm both devices are on the same Wi-Fi, the Android app is in the foreground, and UDP `4950` and `4951` are allowed on the trusted LAN. In auto mode, use Find or QR again to refresh a stale pairing code. In manual mode, verify the phone IP matches exactly.
 - **Virtual microphone unavailable:** run `pactl info` and ensure `pipewire-pulse` is active. Install the `libpulse`/PipeWire packages above and restart the user services if needed. Inspect `pactl list short sinks` and `pactl list short sources`.
-- **Source is missing from an application:** start Voxlink first, then reopen the application's device selector. The source is named `Voxlink Microphone` and the PulseAudio source is `voxlink_mic.monitor`.
+- **Source is missing from an application:** start Voxlink first, then reopen the application's device selector. The source is named `Voxlink Microphone` and the PulseAudio source is `voxlink_microphone`.
 - **No meter activity or crackling:** inspect packet loss and audio queue drops in Voxlink. Move both devices closer to the Wi-Fi access point, avoid congested networks, and close applications that compete for audio. Restart the listener after correcting the network or audio service.
-- **Stale sink after a forced crash:** inspect `pactl list short modules`; if an orphaned `module-null-sink` has argument `sink_name=voxlink_mic`, unload that module with `pactl unload-module MODULE_ID` as your regular user.
+- **Stale device after a forced crash:** inspect `pactl list short modules`; unload only the orphaned module whose arguments name `voxlink_microphone`. An older release may leave `module-null-sink` with `sink_name=voxlink_mic`; close that older app first, then remove its orphaned module with `pactl unload-module MODULE_ID` as your regular user.
 
 For a source capture check while Voxlink is running, use:
 
 ```sh
 pactl list short sources
-parec --device=voxlink_mic.monitor --format=s16le --rate=48000 --channels=1 /tmp/voxlink-capture.raw
+parec --device=voxlink_microphone --format=s16le --rate=48000 --channels=1 /tmp/voxlink-capture.raw
 ```
 
 Speak into the phone for a few seconds, stop `parec` with Ctrl+C, and check that `/tmp/voxlink-capture.raw` is non-empty and changes when the phone is silent versus speaking.

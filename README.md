@@ -33,6 +33,10 @@ To restrict the desktop to a known phone, enter its private Wi-Fi IPv4 address i
 
 Pairing selects an allowed source IP; it is not cryptographic authentication. Discovery exposes the code on the LAN, and audio is unencrypted. Use a trusted network and do not forward either UDP port to the internet.
 
+## Built-in noise suppression
+
+Android’s **Noise suppression** switch reduces background noise using the phone’s audio processor when supported. It defaults on, is applied before transmission, and shows an unavailable state on unsupported phones. The separate noise gate can silence quiet audio between speech.
+
 ## Omarchy desktop microphone
 
 The Tauri desktop app creates a temporary **Voxlink Microphone** PipeWire/PulseAudio input and routes live Android audio into it. Download and launch the [Omarchy desktop AppImage](https://github.com/mrduhlol/Voxlink/releases/latest/download/Voxlink_0.2.0_amd64.AppImage); on first launch, choose **Add to app menu**. Then search for Voxlink from the app launcher, start listening, and select the input in Discord, OBS, a browser, or another recording application. It displays the actual phone connection state, input level, sample rate, packet loss, and audio routing errors.

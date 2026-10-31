@@ -39,6 +39,7 @@ Voxlink requests microphone access because it captures audio locally on the phon
 
 The studio interface and controls are available in the Android APK artifact from the latest successful [Build downloads workflow](https://github.com/mrduhlol/Voxlink/actions/workflows/release.yml). Release APKs only include features present when that release was built.
 
+- **Noise suppression** uses the phone’s built-in microphone noise processor when available, enabled by default. Change it before starting a stream. Unsupported phones show that it is unavailable; the noise gate remains a separate control. Processing happens locally before transmission.
 - **Mute microphone** sends silence while keeping the stream open. Tap again to unmute.
 - **Mic gain** adjusts outgoing audio from 0–200%. Start at 100%; high gain can clip loud sounds. The meter shows the outgoing level.
 - **Noise gate** silences audio blocks below the chosen input threshold. The minimum slider position turns it off. Raise it gently to avoid cutting off quiet speech.
@@ -172,7 +173,7 @@ pactl list short sinks
 pactl list short sources
 ```
 
-While Voxlink is running, the source should be named `voxlink_mic.monitor`. If it is missing, check `pactl info`, confirm the user `pipewire-pulse` service is active, then stop and restart Voxlink. Full troubleshooting is in [omarchy-desktop.md](omarchy-desktop.md).
+While Voxlink is running, the source should be named `voxlink_microphone`. If it is missing, check `pactl info`, confirm the user `pipewire-pulse` service is active, then stop and restart Voxlink. Full troubleshooting is in [omarchy-desktop.md](omarchy-desktop.md).
 
 ## Troubleshooting common connection problems
 

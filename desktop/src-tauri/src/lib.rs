@@ -1,16 +1,16 @@
 mod pairing;
+mod pcm;
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use if_addrs::get_if_addrs;
-use libpulse_binding as pulse;
-use libpulse_simple_binding::Simple as PulseSimple;
 use pairing::{
     AuthGate, ClaimResponse, DiscoveryPacket, PendingPairing, DISCOVERY_PORT, WAITING_FOR_PHONE,
 };
-use pulse::sample::{Format, Spec};
-use pulse::stream::Direction;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,8 +24,7 @@ use voxlink_receiver::AudioPacket;
 
 const UDP_BUFFER_SIZE: usize = 65_535;
 const AUDIO_QUEUE_PACKETS: usize = 10;
-const VIRTUAL_SINK: &str = "voxlink_mic";
-const VIRTUAL_SOURCE: &str = "voxlink_mic.monitor";
+const VIRTUAL_SOURCE: &str = "voxlink_microphone";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -117,6 +116,7 @@ struct RuntimeHandles {
     audio_thread: Option<JoinHandle<()>>,
     module_id: Option<String>,
     owns_module: bool,
+    fifo_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,9 +142,10 @@ struct AppImageInstallState {
     installed: bool,
 }
 
-struct VirtualSink {
+struct VirtualMicrophone {
     module_id: Option<String>,
     owned: bool,
+    fifo_path: Option<PathBuf>,
 }
 
 struct AudioFrame {
@@ -189,61 +190,81 @@ fn list_has_name(output: &str, name: &str) -> bool {
         .any(|entry| entry == name)
 }
 
-fn ensure_virtual_sink() -> Result<VirtualSink, String> {
+fn ensure_virtual_microphone() -> Result<VirtualMicrophone, String> {
     pactl(&["info"])
         .map_err(|error| format!("The PulseAudio compatibility service is unavailable: {error}"))?;
-
-    let sinks = pactl(&["list", "short", "sinks"])?;
-    let mut sink = if list_has_name(&sinks, VIRTUAL_SINK) {
-        VirtualSink {
-            module_id: None,
-            owned: false,
-        }
-    } else {
-        let id = pactl(&[
-            "load-module",
-            "module-null-sink",
-            "sink_name=voxlink_mic",
-            "rate=48000",
-            "channels=1",
-            "channel_map=mono",
-            "sink_properties=device.description='Voxlink Microphone'",
-        ])?;
-        if id.parse::<u32>().is_err() {
-            return Err(format!("pactl returned an invalid module id: {id}"));
-        }
-        VirtualSink {
-            module_id: Some(id),
-            owned: true,
+    if list_has_name(&pactl(&["list", "short", "sources"])?, VIRTUAL_SOURCE) {
+        return Err("A Voxlink microphone already exists. Stop the other Voxlink listener before starting this one.".into());
+    }
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_dir())
+        .ok_or("A user audio session with XDG_RUNTIME_DIR is required. Log into your desktop and retry.")?;
+    let directory = runtime.join("voxlink");
+    fs::create_dir_all(&directory)
+        .map_err(|e| format!("Could not create the microphone pipe folder: {e}"))?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+        .map_err(|e| e.to_string())?;
+    let fifo = directory.join(format!(
+        "microphone-{}-{:x}.fifo",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let file_arg = format!("file={}", fifo.display());
+    let id = match pactl(&[
+        "load-module",
+        "module-pipe-source",
+        "source_name=voxlink_microphone",
+        &file_arg,
+        "format=s16le",
+        "rate=48000",
+        "channels=1",
+        "channel_map=mono",
+        r#"source_properties="device.description=\"Voxlink Microphone\" node.virtual=true priority.session=0""#,
+    ]) {
+        Ok(id) => id,
+        Err(error) => {
+            let _ = fs::remove_file(&fifo);
+            return Err(format!(
+                "Could not create the Voxlink microphone input: {error}"
+            ));
         }
     };
-
-    let source_ready = (0..8).any(|_| match pactl(&["list", "short", "sources"]) {
-        Ok(sources) if list_has_name(&sources, VIRTUAL_SOURCE) => true,
-        _ => {
-            thread::sleep(Duration::from_millis(75));
+    let microphone = VirtualMicrophone {
+        module_id: Some(id),
+        owned: true,
+        fifo_path: Some(fifo),
+    };
+    if !(0..12).any(|_| {
+        if pactl(&["list", "short", "sources"])
+            .is_ok_and(|sources| list_has_name(&sources, VIRTUAL_SOURCE))
+        {
+            true
+        } else {
+            thread::sleep(Duration::from_millis(50));
             false
         }
-    });
-    if !source_ready {
-        if sink.owned {
-            let _ = unload_virtual_sink(&sink);
-            sink.module_id = None;
-        }
-        return Err(format!(
-            "The null sink loaded but its monitor source `{VIRTUAL_SOURCE}` did not appear."
-        ));
+    }) {
+        let _ = unload_virtual_microphone(&microphone);
+        return Err(
+            "The Voxlink microphone input did not appear. Check pipewire-pulse and retry.".into(),
+        );
     }
-
-    Ok(sink)
+    Ok(microphone)
 }
 
-fn unload_virtual_sink(sink: &VirtualSink) -> Result<(), String> {
-    if !sink.owned {
+fn unload_virtual_microphone(microphone: &VirtualMicrophone) -> Result<(), String> {
+    if !microphone.owned {
         return Ok(());
     }
-    if let Some(module_id) = sink.module_id.as_deref() {
-        pactl(&["unload-module", module_id])?;
+    if let Some(id) = &microphone.module_id {
+        pactl(&["unload-module", id])?;
+    }
+    if let Some(path) = &microphone.fifo_path {
+        if let Err(error) = fs::remove_file(path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(format!("Could not remove the microphone pipe: {error}"));
+            }
+        }
     }
     Ok(())
 }
@@ -608,8 +629,8 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
         shared.last_packet_at = None;
     }
 
-    let sink = match ensure_virtual_sink() {
-        Ok(sink) => sink,
+    let microphone = match ensure_virtual_microphone() {
+        Ok(microphone) => microphone,
         Err(error) => {
             error!(%error, "virtual microphone setup failed");
             set_start_error(
@@ -628,14 +649,14 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
         Err(error) => {
             let message = format!("Could not listen on {bind_address}: {error}");
             let recovery = "Check that the address belongs to this PC and that UDP port is not already in use.".to_string();
-            let _ = unload_virtual_sink(&sink);
+            let _ = unload_virtual_microphone(&microphone);
             set_start_error(&state.status, message.clone(), recovery);
             return Err(message);
         }
     };
     if let Err(error) = socket.set_read_timeout(Some(Duration::from_millis(50))) {
         let message = format!("Could not configure the UDP listener: {error}");
-        let _ = unload_virtual_sink(&sink);
+        let _ = unload_virtual_microphone(&microphone);
         set_start_error(
             &state.status,
             message.clone(),
@@ -647,7 +668,7 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
     let discovery = match bind_discovery_socket_on(DISCOVERY_PORT) {
         Ok(socket) => socket,
         Err(message) => {
-            let _ = unload_virtual_sink(&sink);
+            let _ = unload_virtual_microphone(&microphone);
             set_start_error(
                 &state.status,
                 message.clone(),
@@ -664,14 +685,18 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
     let stop = Arc::new(AtomicBool::new(false));
     let (audio_sender, audio_receiver) = bounded::<AudioFrame>(AUDIO_QUEUE_PACKETS);
     let status_for_audio = Arc::clone(&state.status);
+    let fifo_for_audio = microphone
+        .fifo_path
+        .clone()
+        .expect("created microphone has a FIFO");
     let audio_thread = match thread::Builder::new()
-        .name("voxlink-pulse-writer".to_string())
-        .spawn(move || audio_writer(audio_receiver, status_for_audio))
+        .name("voxlink-microphone-writer".to_string())
+        .spawn(move || audio_writer(audio_receiver, status_for_audio, fifo_for_audio))
     {
         Ok(thread) => thread,
         Err(error) => {
             let message = format!("Could not start the audio output thread: {error}");
-            let _ = unload_virtual_sink(&sink);
+            let _ = unload_virtual_microphone(&microphone);
             set_start_error(
                 &state.status,
                 message.clone(),
@@ -704,7 +729,7 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
             drop(audio_sender);
             let _ = audio_thread.join();
             let message = format!("Could not start the UDP receive thread: {error}");
-            let _ = unload_virtual_sink(&sink);
+            let _ = unload_virtual_microphone(&microphone);
             set_start_error(
                 &state.status,
                 message.clone(),
@@ -736,7 +761,7 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
             let _ = receiver_thread.join();
             drop(audio_sender);
             let _ = audio_thread.join();
-            let _ = unload_virtual_sink(&sink);
+            let _ = unload_virtual_microphone(&microphone);
             let message = format!("Could not start discovery: {error}");
             set_start_error(&state.status, message.clone(), "Restart Voxlink.".into());
             return Err(message);
@@ -770,8 +795,9 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
     runtime.discovery_thread = Some(discovery_thread);
     runtime.audio_sender = Some(audio_sender);
     runtime.audio_thread = Some(audio_thread);
-    runtime.module_id = sink.module_id;
-    runtime.owns_module = sink.owned;
+    runtime.module_id = microphone.module_id;
+    runtime.owns_module = microphone.owned;
+    runtime.fifo_path = microphone.fifo_path;
     Ok(())
 }
 
@@ -824,108 +850,88 @@ fn stop_runtime(state: &DesktopState) -> Result<(), String> {
         }
     }
 
-    let sink = VirtualSink {
+    let microphone = VirtualMicrophone {
         module_id: handles.module_id,
         owned: handles.owns_module,
+        fifo_path: handles.fifo_path,
     };
-    match unload_virtual_sink(&sink) {
+    match unload_virtual_microphone(&microphone) {
         Ok(()) => {
             let mut shared = lock_status(&state.status);
-            shared.view.virtual_microphone = if sink.owned {
+            shared.view.virtual_microphone = if microphone.owned {
                 MicrophoneState::Stopped
             } else {
                 MicrophoneState::Ready
             };
-            if sink.owned {
+            if microphone.owned {
                 shared.view.virtual_source = None;
             }
             shared.view.sample_rate = None;
-            info!(owned = sink.owned, "Voxlink audio session stopped");
+            info!(owned = microphone.owned, "Voxlink audio session stopped");
             Ok(())
         }
         Err(error) => {
-            error!(%error, "could not remove Voxlink virtual sink");
+            error!(%error, "could not remove Voxlink virtual microphone");
             let mut shared = lock_status(&state.status);
             shared.view.virtual_microphone = MicrophoneState::Error;
             shared.view.error = Some(format!(
-                "Audio stopped, but the virtual sink could not be removed: {error}"
+                "Audio stopped, but the virtual microphone could not be removed: {error}"
             ));
-            shared.view.recovery = Some("Use `pactl list short modules` to find the Voxlink null-sink module, then unload it with `pactl unload-module MODULE_ID`.".to_string());
+            shared.view.recovery = Some("Use `pactl list short modules` to find the Voxlink pipe-source module, then unload it with `pactl unload-module MODULE_ID`.".to_string());
             Err(error)
         }
     }
 }
 
-fn audio_writer(receiver: Receiver<AudioFrame>, status: Arc<Mutex<SharedStatus>>) {
-    let mut output_rate: Option<u32> = None;
-    let mut output: Option<PulseSimple> = None;
-
+fn audio_writer(receiver: Receiver<AudioFrame>, status: Arc<Mutex<SharedStatus>>, fifo: PathBuf) {
+    let mut output: Option<fs::File> = None;
+    let mut resampler = pcm::PcmResampler::default();
     while let Ok(frame) = receiver.recv() {
-        if output_rate != Some(frame.sample_rate) || output.is_none() {
-            output = None;
-            output_rate = None;
-            let spec = Spec {
-                format: Format::S16NE,
-                channels: 1,
-                rate: frame.sample_rate,
-            };
-            if !spec.is_valid() {
-                set_audio_error(
-                    &status,
-                    format!("Unsupported PCM sample rate: {} Hz", frame.sample_rate),
-                );
-                continue;
-            }
-            match PulseSimple::new(
-                None,
-                "Voxlink",
-                Direction::Playback,
-                Some(VIRTUAL_SINK),
-                "Phone microphone audio",
-                &spec,
-                None,
-                None,
-            ) {
-                Ok(stream) => {
-                    output = Some(stream);
-                    output_rate = Some(frame.sample_rate);
-                    let mut shared = lock_status(&status);
-                    shared.view.sample_rate = Some(frame.sample_rate);
-                    shared.view.virtual_microphone = MicrophoneState::Ready;
-                    shared.view.error = None;
-                    shared.view.recovery = None;
-                    info!(
-                        sample_rate = frame.sample_rate,
-                        sink = VIRTUAL_SINK,
-                        "PulseAudio playback stream ready"
-                    );
+        if output.is_none() {
+            match fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+                .open(&fifo)
+            {
+                Ok(file) => {
+                    // Keep buffered microphone audio below approximately 43 ms. Never block Stop on a reader.
+                    unsafe {
+                        libc::fcntl(file.as_raw_fd(), libc::F_SETPIPE_SZ, 4096);
+                    }
+                    output = Some(file);
                 }
                 Err(error) => {
                     set_audio_error(
                         &status,
-                        format!("Could not open the Voxlink PulseAudio sink: {error:?}"),
+                        format!("Could not open the Voxlink microphone pipe: {error}"),
                     );
                     continue;
                 }
             }
         }
-
-        if let Some(stream) = output.as_ref() {
-            if let Err(error) = stream.write(&frame.pcm) {
-                warn!(
-                    ?error,
-                    "PulseAudio write failed; will reconnect on the next packet"
-                );
-                output = None;
-                output_rate = None;
-                set_audio_error(&status, format!("Audio output failed: {error:?}"));
+        let pcm = resampler.convert(&frame.pcm, frame.sample_rate);
+        let mut failed = false;
+        if let Some(file) = output.as_mut() {
+            // Atomic FIFO writes preserve sample alignment even when the microphone is idle/full.
+            for chunk in pcm.chunks(2048) {
+                if let Err(error) = file.write_all(chunk) {
+                    if error.kind() == std::io::ErrorKind::WouldBlock {
+                        lock_status(&status).view.audio_queue_drops += 1;
+                    } else {
+                        set_audio_error(&status, format!("Microphone input failed: {error}"));
+                        failed = true;
+                    }
+                    break;
+                }
             }
         }
-    }
-
-    if let Some(stream) = output.as_ref() {
-        if let Err(error) = stream.drain() {
-            warn!(?error, "PulseAudio drain failed during stop");
+        if failed {
+            output = None;
+        } else {
+            let mut shared = lock_status(&status);
+            shared.view.sample_rate = Some(frame.sample_rate);
+            shared.view.virtual_microphone = MicrophoneState::Ready;
+            shared.view.error = None;
         }
     }
 }
@@ -934,7 +940,7 @@ fn set_audio_error(status: &Arc<Mutex<SharedStatus>>, message: String) {
     let mut shared = lock_status(status);
     shared.view.virtual_microphone = MicrophoneState::Error;
     shared.view.error = Some(message);
-    shared.view.recovery = Some("Confirm the Voxlink Microphone sink is present in `pactl list short sinks` and restart the listener.".to_string());
+    shared.view.recovery = Some("Confirm Voxlink Microphone appears in `pactl list short sources`, then restart the listener.".to_string());
 }
 
 fn receive_audio(

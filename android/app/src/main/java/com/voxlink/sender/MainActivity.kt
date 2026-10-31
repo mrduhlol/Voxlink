@@ -59,6 +59,10 @@ class MainActivity : Activity() {
     @Volatile private var gateDb = -60
     private var preferredRate = 48000
     private var keepAwake = true
+    private var noiseSuppressionEnabled = true
+    private val noiseSuppressionSupported = NoiseSuppression.isSupported()
+    private lateinit var noiseSwitch: android.widget.Switch
+    private lateinit var noiseStatusText: TextView
     private lateinit var muteButton: Button
     private lateinit var rateButton: Button
     private lateinit var statsText: TextView
@@ -278,6 +282,7 @@ class MainActivity : Activity() {
         gateDb = prefs.getInt("gate", -60).coerceIn(-60, -20)
         preferredRate = prefs.getInt("rate", 48000).let { if (it == 44100) it else 48000 }
         keepAwake = prefs.getBoolean("awake", true)
+        noiseSuppressionEnabled = prefs.getBoolean("noiseSuppression", true)
         val controls = card()
         section(controls, "03", "MICROPHONE CONTROLS")
         muteButton = action("Mute microphone") {
@@ -290,6 +295,25 @@ class MainActivity : Activity() {
             }
         }
         controls.addView(muteButton, LinearLayout.LayoutParams(-1, dp(48)))
+        space(controls, 15)
+        noiseSwitch = android.widget.Switch(this).apply {
+            text = "Noise suppression"
+            textSize = 13f
+            setTextColor(brightColor)
+            isChecked = noiseSuppressionEnabled && noiseSuppressionSupported
+            isEnabled = noiseSuppressionSupported
+            contentDescription = "Reduce background noise using this phone's microphone processing"
+            setOnCheckedChangeListener { _, checked ->
+                noiseSuppressionEnabled = checked
+                prefs.edit().putBoolean("noiseSuppression", checked).apply()
+                noiseStatusText.text = if (checked) "Enabled for the next stream" else "Noise suppression off"
+            }
+        }
+        controls.addView(noiseSwitch, LinearLayout.LayoutParams(-1, dp(52)))
+        noiseStatusText = label(if (!noiseSuppressionSupported) "Not supported by this phone. The noise gate is still available below."
+            else if (noiseSuppressionEnabled) "Reduces steady background noise. Applied when streaming starts."
+            else "Noise suppression off", 11f)
+        controls.addView(noiseStatusText)
         space(controls, 15)
         val gainLabel = label("MIC GAIN  ·  ${(gain * 100).toInt()}%", 11f, mutedColor, mono = true)
         controls.addView(gainLabel)
@@ -541,6 +565,7 @@ class MainActivity : Activity() {
         running = true
         sessionGeneration++
         rateButton.isEnabled = false
+        noiseSwitch.isEnabled = false
         sessionStarted = android.os.SystemClock.elapsedRealtime()
         sentPackets = 0
         sentBytes = 0
@@ -558,6 +583,7 @@ class MainActivity : Activity() {
 
     private fun streamAudio(host: String, port: Int, generation: Int) {
         var recorder: AudioRecord? = null
+        var noiseSession: NoiseSuppression.Session? = null
         var socket: DatagramSocket? = null
         var failure: String? = null
         var closeStatus: String? = null
@@ -616,6 +642,9 @@ class MainActivity : Activity() {
             if (!running) return
             socket = DatagramSocket()
             recorder = createRecorder()
+            noiseSession = NoiseSuppression.open(recorder.audioSessionId, noiseSuppressionEnabled)
+            val suppressionDescription = noiseSession.description
+            runOnUiThread { if (!stale() && !isDestroyed) noiseStatusText.text = suppressionDescription }
             activeRecorder = recorder
             if (!running) return
             recorder.startRecording()
@@ -691,6 +720,7 @@ class MainActivity : Activity() {
             } catch (_: IllegalStateException) {
                 // The Stop button may already have stopped the recorder.
             }
+            noiseSession?.close()
             recorder?.release()
             socket?.close()
             // Run at dispatch time: an old worker's cleanup may reach the UI queue after
@@ -700,6 +730,9 @@ class MainActivity : Activity() {
                 if (stale() || isFinishing || isDestroyed) return@runOnUiThread
                 updateScreenAwake()
                 rateButton.isEnabled = true
+                noiseSwitch.isEnabled = noiseSuppressionSupported
+                noiseStatusText.text = if (!noiseSuppressionSupported) "Not supported by this phone."
+                    else if (noiseSuppressionEnabled) "Enabled for the next stream" else "Noise suppression off"
                 addressInput.isEnabled = true
                 portInput.isEnabled = true
                 pairingInput.isEnabled = true; findButton.isEnabled = !finding; scanButton.isEnabled = !finding

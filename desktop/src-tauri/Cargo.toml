@@ -14,10 +14,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 rand = "0.8"
+libc = "0.2"
 crossbeam-channel = "0.5"
 if-addrs = "0.15"
-libpulse-binding = "2.30"
-libpulse-simple-binding = "2.29"
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2.12", features = [] }
 tracing = "0.1"
