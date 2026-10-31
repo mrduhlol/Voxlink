@@ -33,6 +33,8 @@ object PairingProtocol {
         return if (validCode(code) && port in 1024..65535 && port != DISCOVERY_PORT) Reply(fromHost, port, code) else null
     }
     fun isAck(data: ByteArray, length: Int) = length == 4 && data.size >= 4 && String(data, 0, 4, Charsets.US_ASCII) == "VXLA"
+    fun isPending(data: ByteArray, length: Int) = length == 4 && data.size >= 4 && String(data, 0, 4, Charsets.US_ASCII) == "VXLP"
+    fun isRejected(data: ByteArray, length: Int) = length == 4 && data.size >= 4 && String(data, 0, 4, Charsets.US_ASCII) == "VXLN"
     fun parsePairingUri(uri: String): PairingTarget? = try {
         val parsed = URI(uri)
         val host = parsed.host ?: ""
@@ -89,26 +91,76 @@ object PairingProtocol {
         }
         return replies.values.toList()
     }
-    fun claimWithAck(host: String, port: Int = DISCOVERY_PORT, code: String, timeoutMs: Long = 700): Boolean {
+    /** Outcome of a pairing request against the PC approval contract. */
+    enum class PairingDecision { APPROVED, REJECTED, TIMEDOUT, CANCELLED }
+
+    const val PAIRING_TIMEOUT_MS = 45_000L
+
+    /**
+     * Send VXLC<code> claims and wait for the PC's approval decision (VXLA approved / VXLN
+     * rejected / VXLP pending), retrying the claim periodically for at most [timeoutMs].
+     *
+     * A valid code alone is never approval: this returns REJECTED, TIMEDOUT, or CANCELLED
+     * until the PC answers VXLA. [shouldContinue] aborts early (Stop / activity stopped)
+     * with CANCELLED. [onPending] fires on the transition into the PC's "waiting for
+     * approval" state (first VXLP only, not on every retry).
+     */
+    fun requestPairing(
+        host: String,
+        port: Int = DISCOVERY_PORT,
+        code: String,
+        timeoutMs: Long = PAIRING_TIMEOUT_MS,
+        shouldContinue: () -> Boolean = { true },
+        onPending: () -> Unit = { },
+    ): PairingDecision {
         val claim = buildClaim(code)
         val destination = InetAddress.getByName(host)
         DatagramSocket().use { socket ->
-            val start = System.nanoTime()
-            val deadline = start + timeoutMs * 1_000_000
-            var sent = 0
+            val deadline = System.nanoTime() + timeoutMs * 1_000_000
+            var claimsSent = 0
+            var nextClaimAt = 0L
+            var pendingAnnounced = false
             val bytes = ByteArray(1024)
-            while (System.nanoTime() < deadline) {
-                if (sent < 5 && System.nanoTime() >= start + sent * 140_000_000L) {
-                    socket.send(DatagramPacket(claim, claim.size, destination, port)); sent++
+            while (true) {
+                if (!shouldContinue()) return PairingDecision.CANCELLED
+                val now = System.nanoTime()
+                if (now >= deadline) return PairingDecision.TIMEDOUT
+                // Fast triple burst first so a legacy/immediate VXLA is not delayed, then a
+                // steady retry every 700 ms so the PC keeps seeing the claim while its
+                // approval pop-up is open (VXLP pending) or was missed entirely.
+                if (now >= nextClaimAt) {
+                    socket.send(DatagramPacket(claim, claim.size, destination, port))
+                    claimsSent++
+                    nextClaimAt = now + (if (claimsSent < 3) 140L else 700L) * 1_000_000
                 }
                 socket.soTimeout = minOf(40L, maxOf(1L, (deadline - System.nanoTime()) / 1_000_000)).toInt()
                 val packet = DatagramPacket(bytes, bytes.size)
                 try {
                     socket.receive(packet)
-                    if (packet.address == destination && packet.port == port && isAck(bytes, packet.length)) return true
-                } catch (_: SocketTimeoutException) { }
+                } catch (_: SocketTimeoutException) { continue }
+                if (packet.address != destination || packet.port != port) continue
+                if (isAck(bytes, packet.length)) return PairingDecision.APPROVED
+                if (isPending(bytes, packet.length)) {
+                    // Announce only the transition into "waiting for PC approval": the
+                    // desktop answers VXLP to every retried claim, so firing per packet
+                    // would flood and mislead — no state has changed.
+                    if (!pendingAnnounced) {
+                        pendingAnnounced = true
+                        onPending()
+                    }
+                    // While the PC reports pending, keep claiming every 700 ms in case the
+                    // desktop restarts or wants to refresh its approval pop-up from the claim.
+                    nextClaimAt = System.nanoTime() + 700L * 1_000_000
+                } else if (isRejected(bytes, packet.length)) return PairingDecision.REJECTED
+                // Ignore anything else (VXLR discovery replies, garbage, malformed packets).
             }
         }
-        return false
     }
+
+    /**
+     * Legacy/test helper: true only when the PC answers VXLA immediately, false on VXLP
+     * pending, VXLN rejection, or silence. Delegates to [requestPairing].
+     */
+    fun claimWithAck(host: String, port: Int = DISCOVERY_PORT, code: String, timeoutMs: Long = 700): Boolean =
+        try { requestPairing(host, port, code, timeoutMs) == PairingDecision.APPROVED } catch (_: java.io.IOException) { false }
 }

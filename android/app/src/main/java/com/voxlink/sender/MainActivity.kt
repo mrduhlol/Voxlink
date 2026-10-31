@@ -41,6 +41,13 @@ class MainActivity : Activity() {
     private var worker: Thread? = null
     private var pendingAddress: String? = null
     private var pendingPort: Int? = null
+    /**
+     * Increments every time a new session starts. Worker threads capture their own
+     * generation and every asynchronous UI callback compares against it, so a stale
+     * worker (quick Stop → Start, or onStop's shutdown) can never reset a newer
+     * session's controls or overwrite its status.
+     */
+    @Volatile private var sessionGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +73,10 @@ class MainActivity : Activity() {
     private val limeColor = Color.rgb(194, 240, 106)
     private val brightColor = Color.rgb(238, 240, 235)
     private val mutedColor = Color.rgb(151, 163, 154)
+    private val connectingColor = Color.rgb(38, 105, 224)
+    private val warnColor = Color.rgb(197, 116, 20)
+    private val errorColor = Color.rgb(197, 72, 72)
+    private val stoppedColor = Color.rgb(119, 130, 148)
     private lateinit var sessionTitle: TextView
     private lateinit var formatText: TextView
     private lateinit var levelMeter: android.widget.ProgressBar
@@ -201,7 +212,7 @@ class MainActivity : Activity() {
         space(connection, 10)
         connection.addView(label("PAIRING CODE (FROM PC)", 10f, mutedColor, mono = true))
         space(connection, 8)
-        pairingInput = input(saved.getString("pairingCode", "") ?: "", "Six digits · optional for manual IP lock", true)
+        pairingInput = input(saved.getString("pairingCode", "") ?: "", "Six digits · empty = unverified manual mode", true)
         pairingInput.filters = arrayOf(android.text.InputFilter.LengthFilter(6))
         connection.addView(pairingInput, LinearLayout.LayoutParams(-1, dp(54)))
         space(connection, 10)
@@ -402,7 +413,7 @@ class MainActivity : Activity() {
         space(controls, 14)
         controls.addView(action("Setup & troubleshooting") {
             android.app.AlertDialog.Builder(this).setTitle("Connect Voxlink")
-                .setMessage("1. Connect your phone and PC to the same Wi-Fi.\n\n2. On the PC, select its Wi-Fi address, leave Phone IP empty, and click Start listening.\n\n3. Tap Find my computer here, or Scan QR. The address, port and pairing code fill automatically.\n\n4. Tap Start streaming and allow microphone access.\n\nIf discovery fails, enter the PC Wi-Fi address and six-digit pairing code. Do not use localhost: it points to this phone. Check UDP ports 4950 (audio) and 4951 (discovery), and Wi-Fi client isolation.\n\nFor a legacy receiver or a desktop locked to this phone IP, leave the code empty. Keep Voxlink in the foreground.")
+                .setMessage("1. Connect your phone and PC to the same Wi-Fi.\n\n2. On the PC, select its Wi-Fi address, leave Phone IP empty, and click Start listening.\n\n3. Tap Find my computer here, or Scan QR. The address, port and pairing code fill automatically.\n\n4. Tap Start streaming, allow microphone access, then approve the phone on the PC: a matching code alone never starts the stream. The PC shows an Allow/Reject pop-up — tap Allow and streaming begins. Tap Reject (or wait 45 seconds) and nothing is sent.\n\nIf discovery fails, enter the PC Wi-Fi address and six-digit pairing code. Do not use localhost: it points to this phone. Check UDP ports 4950 (audio) and 4951 (discovery), and Wi-Fi client isolation.\n\nFor a legacy receiver or a desktop locked to this phone IP, leave the code empty. That works but is unverified: the phone cannot confirm the PC receives it — check the desktop app. Keep Voxlink in the foreground.")
                 .setPositiveButton("Got it", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
         return controls
@@ -464,7 +475,11 @@ class MainActivity : Activity() {
             } catch (error: Exception) {
                 runOnUiThread { if (!isDestroyed) setStatus("Discovery failed: ${error.message}. Try Scan QR or enter the PC address.", mutedColor) }
             } finally {
-                runOnUiThread { finding = false; findButton.isEnabled = !running; scanButton.isEnabled = !running; startButton.isEnabled = !running }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    finding = false
+                    findButton.isEnabled = !running; scanButton.isEnabled = !running; startButton.isEnabled = !running
+                }
             }
         }.start()
     }
@@ -524,6 +539,7 @@ class MainActivity : Activity() {
         addressInput.isEnabled = false
         portInput.isEnabled = false
         running = true
+        sessionGeneration++
         rateButton.isEnabled = false
         sessionStarted = android.os.SystemClock.elapsedRealtime()
         sentPackets = 0
@@ -534,23 +550,69 @@ class MainActivity : Activity() {
         startButton.alpha = 0.55f
         stopButton.isEnabled = true
         stopButton.alpha = 1f
-        setStatus("Connecting to $address:$port…", Color.rgb(38, 105, 224))
+        setStatus("Connecting to $address:$port…", connectingColor)
 
-        worker = Thread({ streamAudio(address, port) }, "voxlink-audio-sender")
+        worker = Thread({ streamAudio(address, port, sessionGeneration) }, "voxlink-audio-sender")
         worker?.start()
     }
 
-    private fun streamAudio(host: String, port: Int) {
+    private fun streamAudio(host: String, port: Int, generation: Int) {
         var recorder: AudioRecord? = null
         var socket: DatagramSocket? = null
         var failure: String? = null
+        var closeStatus: String? = null
+        var closeColor = stoppedColor
+        // A callback is stale if a newer session started after this worker. Stale
+        // callbacks must not touch the UI at all — the current session owns it.
+        fun stale() = generation != sessionGeneration
 
         try {
             val destination = InetAddress.getByName(host)
             if (!running) return
-            val pairingStatus = if (sessionCode.isEmpty()) "Streaming to $host — pair with a code for auto mode."
-                else if (try { PairingProtocol.claimWithAck(host, code = sessionCode) } catch (_: java.io.IOException) { false }) "Paired with $host"
-                else "No pairing ack — is Voxlink listening on the PC?"
+            val pairingStatus: String
+            if (sessionCode.isNotEmpty()) {
+                showStatus("Asking $host to approve pairing…", connectingColor, generation)
+                var decision: PairingProtocol.PairingDecision? = null
+                try {
+                    decision = PairingProtocol.requestPairing(
+                        host,
+                        code = sessionCode,
+                        shouldContinue = { running },
+                        onPending = {
+                            showStatus(
+                                "Waiting for approval — check the PC for the Allow/Reject pop-up and tap Allow. A matching code alone never starts the stream.",
+                                connectingColor,
+                                generation
+                            )
+                        },
+                    )
+                } catch (error: java.io.IOException) {
+                    closeStatus = "Could not reach $host for pairing: ${error.message}. Check that Voxlink is listening on the PC and both devices are on the same Wi-Fi."
+                    closeColor = errorColor
+                }
+                when (decision) {
+                    PairingProtocol.PairingDecision.APPROVED -> {
+                        pairingStatus = "Paired with $host"
+                    }
+                    null -> return
+                    PairingProtocol.PairingDecision.REJECTED -> {
+                        closeStatus = "Your computer rejected the pairing request. Nothing was sent. On the PC choose Allow (or refresh the code), then press Start streaming again."
+                        closeColor = errorColor
+                        return
+                    }
+                    PairingProtocol.PairingDecision.TIMEDOUT -> {
+                        closeStatus = "No approval within ${PairingProtocol.PAIRING_TIMEOUT_MS / 1000} seconds. Check the PC for the Allow/Reject pop-up, tap Allow, and press Start streaming again. Nothing was sent."
+                        closeColor = warnColor
+                        return
+                    }
+                    PairingProtocol.PairingDecision.CANCELLED -> {
+                        closeStatus = "Pairing cancelled before the computer approved it."
+                        return
+                    }
+                }
+            } else {
+                pairingStatus = "Streaming to $host — unverified: no pairing code, so the phone cannot confirm the PC receives it. Check the desktop app."
+            }
             if (!running) return
             socket = DatagramSocket()
             recorder = createRecorder()
@@ -561,11 +623,11 @@ class MainActivity : Activity() {
             if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
                 throw IOException("Android did not start microphone capture")
             }
-            showStatus(pairingStatus)
+            showStatus(pairingStatus, limeColor, generation)
 
             val sampleRate = recorder.sampleRate
             val samples = ShortArray(PACKET_SAMPLES)
-            runOnUiThread { formatText.text = "${sampleRate / 1000f} kHz  /  MONO  /  PCM16" }
+            runOnUiThread { if (!stale()) formatText.text = "${sampleRate / 1000f} kHz  /  MONO  /  PCM16" }
             var lastMeterUpdate = 0L
             var sequence = 0
             while (running) {
@@ -592,7 +654,7 @@ class MainActivity : Activity() {
                     for (index in 0 until count) peak = maxOf(peak, kotlin.math.abs(samples[index].toInt()))
                     val db = if (peak == 0) -60.0 else maxOf(-60.0, 20 * kotlin.math.log10(peak / 32768.0))
                     runOnUiThread {
-                        if (running) {
+                        if (!stale()) {
                             levelMeter.progress = ((db + 60) / 60 * 100).toInt()
                             levelText.text = if (muted) "MUTED" else "${db.toInt()} dBFS"
                             val elapsed = (android.os.SystemClock.elapsedRealtime() - sessionStarted) / 1000
@@ -631,7 +693,11 @@ class MainActivity : Activity() {
             }
             recorder?.release()
             socket?.close()
+            // Run at dispatch time: an old worker's cleanup may reach the UI queue after
+            // the user already started a newer session (its buttons are re-enabled by
+            // this very callback). A stale callback must not reset the new session.
             runOnUiThread {
+                if (stale() || isFinishing || isDestroyed) return@runOnUiThread
                 updateScreenAwake()
                 rateButton.isEnabled = true
                 addressInput.isEnabled = true
@@ -642,6 +708,7 @@ class MainActivity : Activity() {
                 stopButton.isEnabled = false
                 stopButton.alpha = 0.55f
                 if (failure != null) setStatus("Error: $failure", Color.rgb(197, 72, 72))
+                else if (closeStatus != null) setStatus(closeStatus, closeColor)
                 else setStatus("Stopped", Color.rgb(119, 130, 148))
             }
         }
@@ -681,18 +748,35 @@ class MainActivity : Activity() {
         bytes[offset + 3] = value.toByte()
     }
 
-    private fun showStatus(message: String) {
-        runOnUiThread { if (running) setStatus(message, limeColor) }
+    private fun showStatus(message: String, color: Int = limeColor, generation: Int = sessionGeneration) {
+        runOnUiThread {
+            // Checked at dispatch time: callbacks from an old session must not describe
+            // the newer session's status.
+            if (generation == sessionGeneration && !isFinishing && !isDestroyed) setStatus(message, color)
+        }
     }
 
     private fun setStatus(message: String, color: Int) {
         statusText.text = message
         statusDot.setTextColor(color)
         val active = running && (message.startsWith("Sending") || message.startsWith("Paired") || message.startsWith("Streaming"))
-        val error = message.startsWith("Error") || message.contains("denied") || message.startsWith("Enter")
-        liveBadge.text = when { active -> "● SENDING"; error -> "● ERROR"; running -> "● STARTING"; else -> "● STANDBY" }
+        val pairing = running && !active && (message.startsWith("Asking") || message.startsWith("Waiting for approval"))
+        val error = message.startsWith("Error") || message.contains("denied") || message.contains("rejected") || message.startsWith("Enter")
+        liveBadge.text = when {
+            active -> "● SENDING"
+            error -> "● ERROR"
+            pairing -> "● AWAITING PC"
+            running -> "● STARTING"
+            else -> "● STANDBY"
+        }
         liveBadge.setTextColor(if (error) Color.rgb(255, 119, 113) else if (running) limeColor else mutedColor)
-        sessionTitle.text = when { active -> "You're on air"; error -> "Check your connection"; running -> "Opening microphone…"; else -> "Ready to go live" }
+        sessionTitle.text = when {
+            active -> "You're on air"
+            error -> "Check your connection"
+            pairing -> "Waiting for PC approval"
+            running -> "Opening microphone…"
+            else -> "Ready to go live"
+        }
         if (!running) {
             levelMeter.progress = 0
             levelText.text = "— dBFS"
@@ -702,12 +786,13 @@ class MainActivity : Activity() {
     private fun stopRecording() {
         if (!running) return
         running = false
+        updateScreenAwake()
         try {
             activeRecorder?.stop()
         } catch (_: IllegalStateException) {
             // Capture may already have stopped after an audio error.
         }
-        setStatus("Stopping…", Color.rgb(197, 116, 20))
+        setStatus("Stopping…", warnColor)
     }
 
     override fun onStop() {

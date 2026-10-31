@@ -13,7 +13,7 @@ Each Android datagram has a 12-byte header followed by mono signed 16-bit little
 | 8 | 4 | Sample rate in Hz, unsigned big-endian |
 | 12 | remaining | PCM16 mono samples, little-endian |
 
-The desktop binds audio only to the chosen PC Wi-Fi IPv4. With Phone IP empty it accepts audio from the phone that claims the pairing code; an optional private Phone IP locks audio to that address. Invalid packets and out-of-order sequence numbers are dropped and counted. A bounded queue keeps the network reader independent from audio playback; overflow is counted in diagnostics.
+The desktop binds audio only to the chosen PC Wi-Fi IPv4. With Phone IP empty it asks you to approve a phone that presents the pairing code, then accepts audio from that approved phone; an optional private Phone IP locks audio to that address. Invalid packets and out-of-order sequence numbers are dropped and counted. A bounded queue keeps the network reader independent from audio playback; overflow is counted in diagnostics.
 
 ## PipeWire microphone route
 
@@ -77,11 +77,12 @@ Tauri writes the AppImage under `desktop/src-tauri/target/release/bundle/appimag
 1. Connect both devices to the same trusted Wi-Fi network.
 2. On the PC, choose its **PC Wi-Fi address**, leave **Phone IP address** empty, and click **Start listening**.
 3. On Android, tap **Find my computer**. If several PCs appear, choose the one whose pairing code matches the desktop. Or tap **Scan QR** and scan the desktop's QR code; camera permission is only needed for scanning.
-4. Tap **Start streaming**, allow microphone access, and select **Voxlink Microphone** in your call or recording app.
+4. Tap **Start streaming**, allow microphone access, then choose **Allow pairing** in the confirmation popup on the PC. The phone waits for that approval before capturing or sending audio.
+5. Once the PC shows **Receiving audio**, select **Voxlink Microphone** in your call or recording app.
 
 If discovery cannot find the PC, enter the PC's Wi-Fi IPv4 address, audio port (default `4950`), and six-digit pairing code manually on the phone. `localhost` and `127.0.0.1` refer to the phone itself, not the PC. You no longer need to find the phone's IP address for normal setup.
 
-The PC keeps the same pairing code across launches. To change it, stop listening and click **Refresh code**. Reconnect the phone using Find, QR, or the new code. Discovery uses UDP `4951`; audio uses UDP `4950` by default. Allow both on your trusted LAN, and check guest-network/client isolation if neither Find nor QR connects. Port `4951` is reserved for discovery.
+The PC keeps the same pairing code across launches. To change it, stop listening and click **Refresh code**. Reconnect the phone using Find, QR, or the new code. Discovery uses UDP `4951`; audio uses UDP `4950` by default. Allow both on your trusted LAN, and check guest-network/client isolation if neither Find nor QR connects. Port `4951` is reserved for discovery. Pairing requests wait up to 45 seconds on the phone; **Reject** or a timeout sends no microphone audio. A **Paired · no audio** label on the PC means approval succeeded but audio has not arrived; it is separate from **Receiving audio**.
 
 ### Manual IP lock and legacy receiver
 
@@ -93,6 +94,7 @@ Pairing selects an allowed source IP; it is not cryptographic authentication. Di
 ## Diagnostics and troubleshooting
 
 - **No Wi-Fi address appears:** check `ip -brief address`; choose the private IPv4 on the active Wi-Fi interface. Do not bind to `127.0.0.1` or a public address.
+- **No pairing popup on a PC with UFW enabled:** allow both Voxlink UDP ports from your trusted Wi-Fi subnet. For example, if `ip -4 address` shows `192.168.0.108/24` on `wlp2s0`, run `sudo ufw allow in on wlp2s0 from 192.168.0.0/24 to any port 4950:4951 proto udp`. Substitute your own interface and subnet. A blocked discovery port prevents the approval popup; a blocked audio port leaves an approved phone paired without audio.
 - **Connecting, but no packets arrive:** confirm both devices are on the same Wi-Fi, the Android app is in the foreground, and UDP `4950` and `4951` are allowed on the trusted LAN. In auto mode, use Find or QR again to refresh a stale pairing code. In manual mode, verify the phone IP matches exactly.
 - **Virtual microphone unavailable:** run `pactl info` and ensure `pipewire-pulse` is active. Install the `libpulse`/PipeWire packages above and restart the user services if needed. Inspect `pactl list short sinks` and `pactl list short sources`.
 - **Source is missing from an application:** start Voxlink first, then reopen the application's device selector. The source is named `Voxlink Microphone` and the PulseAudio source is `voxlink_mic.monitor`.

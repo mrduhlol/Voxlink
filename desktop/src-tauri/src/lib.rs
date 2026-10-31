@@ -3,7 +3,9 @@ use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use if_addrs::get_if_addrs;
 use libpulse_binding as pulse;
 use libpulse_simple_binding::Simple as PulseSimple;
-use pairing::{AuthGate, DiscoveryPacket, DISCOVERY_PORT, WAITING_FOR_PHONE};
+use pairing::{
+    AuthGate, ClaimResponse, DiscoveryPacket, PendingPairing, DISCOVERY_PORT, WAITING_FOR_PHONE,
+};
 use pulse::sample::{Format, Spec};
 use pulse::stream::Direction;
 use serde::{Deserialize, Serialize};
@@ -44,6 +46,15 @@ enum MicrophoneState {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum PairingState {
+    #[default]
+    Unpaired,
+    Pending,
+    Paired,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StatusView {
@@ -66,6 +77,8 @@ struct StatusView {
     error: Option<String>,
     recovery: Option<String>,
     pairing_code: String,
+    pairing_state: PairingState,
+    pending_pairing: Option<PendingPairing>,
 }
 
 #[derive(Default)]
@@ -97,6 +110,7 @@ struct DesktopState {
 #[derive(Default)]
 struct RuntimeHandles {
     stop: Option<Arc<AtomicBool>>,
+    auth: Option<Arc<Mutex<AuthGate>>>,
     receiver_thread: Option<JoinHandle<()>>,
     discovery_thread: Option<JoinHandle<()>>,
     audio_sender: Option<Sender<AudioFrame>>,
@@ -436,6 +450,62 @@ fn refresh_pairing_code(state: State<'_, DesktopState>) -> Result<String, String
     Ok(code)
 }
 
+fn sync_pairing_status(auth: &AuthGate, status: &Arc<Mutex<SharedStatus>>) {
+    let mut shared = lock_status(status);
+    shared.view.pending_pairing = auth.pending();
+    shared.view.pairing_state = if shared.view.pending_pairing.is_some() {
+        PairingState::Pending
+    } else if auth.paired_phone().is_some() {
+        PairingState::Paired
+    } else {
+        PairingState::Unpaired
+    };
+    if let Some(ip) = auth.paired_phone() {
+        shared.view.phone_address = Some(ip.to_string());
+    }
+}
+
+#[tauri::command]
+fn respond_to_pairing(
+    state: State<'_, DesktopState>,
+    request_id: u64,
+    allow: bool,
+) -> Result<(), String> {
+    respond_to_pairing_inner(&state, request_id, allow)
+}
+
+fn respond_to_pairing_inner(
+    state: &DesktopState,
+    request_id: u64,
+    allow: bool,
+) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "Voxlink runtime state is unavailable.")?;
+    let auth = runtime
+        .auth
+        .as_ref()
+        .ok_or("Start listening before pairing a phone.")?;
+    let mut auth = auth.lock().unwrap_or_else(|p| p.into_inner());
+    let ip = auth.respond(request_id, allow)?;
+    sync_pairing_status(&auth, &state.status);
+    let mut shared = lock_status(&state.status);
+    if allow {
+        shared.view.connection = ConnectionState::Connecting;
+        shared.last_packet_at = None;
+        shared.view.input_level = 0.0;
+        shared.view.input_peak_dbfs = None;
+        shared.view.sample_rate = None;
+        shared.view.recovery = Some(format!("Paired with {ip}. Waiting for audio — start streaming on the phone. If no audio arrives, allow the audio UDP port on this PC's trusted network."));
+    } else if auth.paired_phone().is_none() {
+        shared.view.recovery = Some(format!(
+            "Pairing request from {ip} rejected. No audio from this phone is allowed."
+        ));
+    }
+    Ok(())
+}
+
 fn bind_discovery_socket_on(port: u16) -> Result<UdpSocket, String> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AddrInUse {
@@ -456,11 +526,15 @@ fn run_discovery_responder(
     code: String,
     auth: Arc<Mutex<AuthGate>>,
     stop: Arc<AtomicBool>,
+    status: Arc<Mutex<SharedStatus>>,
 ) {
     let mut buffer = [0u8; 1024];
     while !stop.load(Ordering::Relaxed) {
         match socket.recv_from(&mut buffer) {
             Ok((length, peer)) => {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 let IpAddr::V4(source) = peer.ip() else {
                     continue;
                 };
@@ -469,12 +543,17 @@ fn run_discovery_responder(
                         let _ = socket.send_to(&pairing::encode_reply(&code, audio_port), peer);
                     }
                     DiscoveryPacket::Claim { code: claim } => {
-                        if auth
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .claim(source, claim, &code)
-                        {
-                            let _ = socket.send_to(&pairing::encode_ack(), peer);
+                        let mut gate = auth.lock().unwrap_or_else(|p| p.into_inner());
+                        let response = gate.request(source, claim, &code);
+                        sync_pairing_status(&gate, &status);
+                        let bytes = match response {
+                            ClaimResponse::Approved => Some(pairing::encode_ack()),
+                            ClaimResponse::Pending => Some(*b"VXLP"),
+                            ClaimResponse::Rejected => Some(*b"VXLN"),
+                            ClaimResponse::Invalid => None,
+                        };
+                        if let Some(bytes) = bytes {
+                            let _ = socket.send_to(&bytes, peer);
                         }
                     }
                     _ => {}
@@ -484,7 +563,12 @@ fn run_discovery_responder(
                 if matches!(
                     error.kind(),
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) => {}
+                ) =>
+            {
+                let mut gate = auth.lock().unwrap_or_else(|p| p.into_inner());
+                gate.expire_pending();
+                sync_pairing_status(&gate, &status);
+            }
             Err(error) => {
                 warn!(%error, "Discovery listener stopped");
                 break;
@@ -631,11 +715,21 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
     };
 
     let discovery_stop = Arc::clone(&stop);
+    let discovery_status = Arc::clone(&state.status);
+    let discovery_auth = Arc::clone(&auth);
     let code = lock_status(&state.status).view.pairing_code.clone();
     let discovery_thread = match thread::Builder::new()
         .name("voxlink-discovery".into())
-        .spawn(move || run_discovery_responder(discovery, config.port, code, auth, discovery_stop))
-    {
+        .spawn(move || {
+            run_discovery_responder(
+                discovery,
+                config.port,
+                code,
+                discovery_auth,
+                discovery_stop,
+                discovery_status,
+            )
+        }) {
         Ok(handle) => handle,
         Err(error) => {
             stop.store(true, Ordering::Relaxed);
@@ -655,12 +749,22 @@ fn start_stream(state: State<'_, DesktopState>, config: StartConfig) -> Result<(
         shared.view.virtual_source = Some(VIRTUAL_SOURCE.to_string());
         shared.view.bind_address = Some(local_address.clone());
         shared.view.phone_address = phone_ip.map(|ip| ip.to_string());
+        shared.view.pairing_state = if phone_ip.is_some() {
+            PairingState::Paired
+        } else {
+            PairingState::Unpaired
+        };
         shared.view.port = config.port;
         shared.view.error = None;
         shared.view.recovery = phone_ip.is_none().then(|| WAITING_FOR_PHONE.to_string());
     }
+    sync_pairing_status(
+        &auth.lock().unwrap_or_else(|p| p.into_inner()),
+        &state.status,
+    );
     info!(%local_address, ?phone_ip, port = config.port, source = VIRTUAL_SOURCE, "Voxlink listener started");
 
+    runtime.auth = Some(auth);
     runtime.stop = Some(stop);
     runtime.receiver_thread = Some(receiver_thread);
     runtime.discovery_thread = Some(discovery_thread);
@@ -691,6 +795,8 @@ fn stop_runtime(state: &DesktopState) -> Result<(), String> {
     {
         let mut shared = lock_status(&state.status);
         shared.view.listening = false;
+        shared.view.pairing_state = PairingState::Unpaired;
+        shared.view.pending_pairing = None;
         shared.view.connection = ConnectionState::Disconnected;
         shared.view.input_level = 0.0;
         shared.view.input_peak_dbfs = None;
@@ -704,6 +810,12 @@ fn stop_runtime(state: &DesktopState) -> Result<(), String> {
         if receiver.join().is_err() {
             warn!("UDP receiver thread panicked during shutdown");
         }
+    }
+    {
+        let mut shared = lock_status(&state.status);
+        shared.view.pending_pairing = None;
+        shared.view.pairing_state = PairingState::Unpaired;
+        shared.view.connection = ConnectionState::Disconnected;
     }
     drop(handles.audio_sender);
     if let Some(audio) = handles.audio_thread {
@@ -833,8 +945,7 @@ fn receive_audio(
     audio_sender: Sender<AudioFrame>,
     status: Arc<Mutex<SharedStatus>>,
 ) {
-    let start_time = Instant::now();
-    let mut ever_connected = false;
+    let mut last_audio_at: Option<Instant> = None;
     let mut reported_unauthorized = false;
     let mut previous_source = None;
     let mut expected_sequence: Option<u32> = None;
@@ -859,9 +970,9 @@ fn receive_audio(
                     }
                     continue;
                 }
-                if previous_source != Some(source) {
+                if previous_source != Some(peer) {
                     expected_sequence = None;
-                    previous_source = Some(source);
+                    previous_source = Some(peer);
                 }
                 let packet = match AudioPacket::parse(&buffer[..length]) {
                     Ok(packet) => packet,
@@ -875,6 +986,10 @@ fn receive_audio(
                     }
                 };
 
+                // Android starts each new capture at zero, including a restart from the same IP/socket.
+                if packet.sequence == 0 && expected_sequence.is_some_and(|expected| expected > 1) {
+                    expected_sequence = None;
+                }
                 if let Some(expected) = expected_sequence {
                     let distance = packet.sequence.wrapping_sub(expected);
                     if distance < (1 << 31) {
@@ -900,7 +1015,7 @@ fn receive_audio(
                     shared.view.input_peak_dbfs = Some(peak);
                     shared.last_packet_at = Some(Instant::now());
                 }
-                ever_connected = true;
+                last_audio_at = Some(Instant::now());
 
                 match audio_sender.try_send(AudioFrame {
                     sample_rate: packet.sample_rate,
@@ -919,15 +1034,34 @@ fn receive_audio(
                 if error.kind() == std::io::ErrorKind::WouldBlock
                     || error.kind() == std::io::ErrorKind::TimedOut =>
             {
+                let paired = auth
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .paired_phone();
                 let mut shared = lock_status(&status);
-                if shared
-                    .last_packet_at
-                    .is_some_and(|last| last.elapsed() >= timeout)
-                    || (!ever_connected && start_time.elapsed() >= timeout)
-                {
+                if shared.last_packet_at.is_none() {
+                    last_audio_at = None;
+                    expected_sequence = None;
+                    previous_source = None;
+                }
+                if last_audio_at.is_some_and(|last| last.elapsed() >= timeout) {
+                    expected_sequence = None;
+                    previous_source = None;
                     shared.view.connection = ConnectionState::Disconnected;
                     shared.view.input_level = 0.0;
                     shared.view.input_peak_dbfs = None;
+                    if let Some(ip) = paired {
+                        shared.view.recovery = Some(format!("Paired with {ip}, but audio stopped. Restart streaming on the phone; check the PC audio UDP port if no packets arrive."));
+                    }
+                } else if last_audio_at.is_none() {
+                    shared.view.connection = ConnectionState::Connecting;
+                    if let Some(ip) = paired {
+                        if shared.view.pending_pairing.is_none() {
+                            shared.view.recovery = Some(format!(
+                                "Paired with {ip}. Waiting for audio from the phone."
+                            ));
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -984,6 +1118,7 @@ pub fn run() {
             get_local_addresses,
             get_pairing_uri,
             refresh_pairing_code,
+            respond_to_pairing,
             get_status,
             get_appimage_install_state,
             install_appimage_launcher,
@@ -1068,9 +1203,11 @@ mod pairing_integration_tests {
         let address = responder.local_addr().unwrap();
         let auth = Arc::new(Mutex::new(AuthGate::new(None)));
         let stop = Arc::new(AtomicBool::new(false));
-        let (a, s) = (auth.clone(), stop.clone());
-        let handle =
-            thread::spawn(move || run_discovery_responder(responder, 4950, "482913".into(), a, s));
+        let status = Arc::new(Mutex::new(SharedStatus::default()));
+        let (a, s, v) = (auth.clone(), stop.clone(), status.clone());
+        let handle = thread::spawn(move || {
+            run_discovery_responder(responder, 4950, "482913".into(), a, s, v)
+        });
         let client = socket();
         let mut buffer = [0; 32];
         for _ in 0..2 {
@@ -1085,7 +1222,32 @@ mod pairing_integration_tests {
         }
         client.send_to(b"VXLC482913", address).unwrap();
         let (n, _) = client.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..n], b"VXLP");
+        let request_id = auth.lock().unwrap().pending().unwrap().request_id;
+        assert_eq!(
+            lock_status(&status).view.pairing_state,
+            PairingState::Pending
+        );
+        assert_eq!(
+            lock_status(&status)
+                .view
+                .pending_pairing
+                .as_ref()
+                .unwrap()
+                .request_id,
+            request_id
+        );
+        assert!(!auth.lock().unwrap().allows(Ipv4Addr::LOCALHOST));
+        auth.lock().unwrap().respond(request_id, true).unwrap();
+        client.send_to(b"VXLC482913", address).unwrap();
+        let (n, _) = client.recv_from(&mut buffer).unwrap();
         assert_eq!(&buffer[..n], b"VXLA");
+        assert_eq!(
+            lock_status(&status).view.pairing_state,
+            PairingState::Paired
+        );
+        assert!(lock_status(&status).view.pending_pairing.is_none());
+        assert_eq!(lock_status(&status).view.packets_received, 0);
         assert!(auth.lock().unwrap().allows(Ipv4Addr::LOCALHOST));
         stop.store(true, Ordering::Relaxed);
         handle.join().unwrap();
@@ -1122,9 +1284,12 @@ mod pairing_integration_tests {
             );
         }
         assert_eq!(lock_status(&status).view.packets_received, 0);
-        auth.lock()
-            .unwrap()
-            .claim(Ipv4Addr::LOCALHOST, "482913", "482913");
+        {
+            let mut gate = auth.lock().unwrap();
+            gate.request(Ipv4Addr::LOCALHOST, "482913", "482913");
+            let id = gate.pending().unwrap().request_id;
+            gate.respond(id, true).unwrap();
+        }
         client.send_to(&packet, address).unwrap();
         wait_until(|| lock_status(&status).view.packets_received == 1);
         assert_eq!(
@@ -1134,5 +1299,109 @@ mod pairing_integration_tests {
         assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
         stop.store(true, Ordering::Relaxed);
         handle.join().unwrap();
+    }
+    #[test]
+    fn phone_capture_restart_recovers_on_same_ip_and_sequence_zero() {
+        let listener = socket();
+        let address = listener.local_addr().unwrap();
+        let auth = Arc::new(Mutex::new(AuthGate::new(Some(Ipv4Addr::LOCALHOST))));
+        let stop = Arc::new(AtomicBool::new(false));
+        let status = Arc::new(Mutex::new(SharedStatus::default()));
+        let (tx, _rx) = bounded(10);
+        let (a, s, v) = (auth.clone(), stop.clone(), status.clone());
+        let handle =
+            thread::spawn(move || receive_audio(listener, a, Duration::from_millis(120), s, tx, v));
+        let client = socket();
+        let send = |client: &UdpSocket, sequence: u32| {
+            let mut packet = b"VXL1".to_vec();
+            packet.extend(sequence.to_be_bytes());
+            packet.extend(48000u32.to_be_bytes());
+            packet.extend([0, 0]);
+            client.send_to(&packet, address).unwrap();
+        };
+        send(&client, 100);
+        wait_until(|| lock_status(&status).view.packets_received == 1);
+        send(&client, 0);
+        wait_until(|| lock_status(&status).view.packets_received == 2);
+        send(&client, 1);
+        wait_until(|| lock_status(&status).view.packets_received == 3);
+        assert_eq!(lock_status(&status).view.packets_invalid, 0);
+        wait_until(|| lock_status(&status).view.connection == ConnectionState::Disconnected);
+        send(&client, 0);
+        wait_until(|| lock_status(&status).view.packets_received == 4);
+        let new_socket = socket();
+        send(&new_socket, 0);
+        wait_until(|| lock_status(&status).view.packets_received == 5);
+        assert_eq!(
+            lock_status(&status).view.connection,
+            ConnectionState::Connected
+        );
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
+    #[test]
+    fn paired_phone_waiting_for_first_audio_is_not_marked_disconnected() {
+        let listener = socket();
+        let auth = Arc::new(Mutex::new(AuthGate::new(Some(Ipv4Addr::LOCALHOST))));
+        let stop = Arc::new(AtomicBool::new(false));
+        let status = Arc::new(Mutex::new(SharedStatus::default()));
+        let (tx, _rx) = bounded(10);
+        let (a, s, v) = (auth.clone(), stop.clone(), status.clone());
+        let handle =
+            thread::spawn(move || receive_audio(listener, a, Duration::from_millis(30), s, tx, v));
+        wait_until(|| lock_status(&status).view.recovery.is_some());
+        assert_eq!(
+            lock_status(&status).view.connection,
+            ConnectionState::Connecting
+        );
+        assert_eq!(lock_status(&status).view.packets_received, 0);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
+    #[test]
+    fn approval_resets_old_audio_and_stop_invalidates_pending_requests() {
+        let state = DesktopState::default();
+        let auth = Arc::new(Mutex::new(AuthGate::new(None)));
+        let ip = Ipv4Addr::new(192, 168, 1, 42);
+        auth.lock().unwrap().request(ip, "482913", "482913");
+        let id = auth.lock().unwrap().pending().unwrap().request_id;
+        state.runtime.lock().unwrap().auth = Some(auth.clone());
+        {
+            let mut shared = lock_status(&state.status);
+            shared.view.listening = true;
+            shared.view.connection = ConnectionState::Connected;
+            shared.view.input_level = 0.8;
+            shared.last_packet_at = Some(Instant::now());
+        }
+        respond_to_pairing_inner(&state, id, true).unwrap();
+        {
+            let shared = lock_status(&state.status);
+            assert_eq!(shared.view.pairing_state, PairingState::Paired);
+            assert_eq!(shared.view.connection, ConnectionState::Connecting);
+            assert_eq!(shared.view.phone_address.as_deref(), Some("192.168.1.42"));
+            assert_eq!(shared.view.packets_received, 0);
+            assert_eq!(shared.view.input_level, 0.0);
+            assert!(shared.last_packet_at.is_none());
+        }
+        let other = Ipv4Addr::new(192, 168, 1, 77);
+        auth.lock().unwrap().request(other, "482913", "482913");
+        let stale_id = auth.lock().unwrap().pending().unwrap().request_id;
+        sync_pairing_status(&auth.lock().unwrap(), &state.status);
+        stop_runtime(&state).unwrap();
+        assert!(lock_status(&state.status).view.pending_pairing.is_none());
+        assert_eq!(
+            lock_status(&state.status).view.pairing_state,
+            PairingState::Unpaired
+        );
+        assert!(respond_to_pairing_inner(&state, stale_id, true).is_err());
+        let new_auth = Arc::new(Mutex::new(AuthGate::new(None)));
+        new_auth.lock().unwrap().request(other, "482913", "482913");
+        let new_id = new_auth.lock().unwrap().pending().unwrap().request_id;
+        state.runtime.lock().unwrap().auth = Some(new_auth.clone());
+        assert_ne!(new_id, stale_id);
+        assert!(respond_to_pairing_inner(&state, stale_id, true).is_err());
+        assert!(!new_auth.lock().unwrap().allows(other));
+        respond_to_pairing_inner(&state, new_id, true).unwrap();
+        assert!(new_auth.lock().unwrap().allows(other));
     }
 }

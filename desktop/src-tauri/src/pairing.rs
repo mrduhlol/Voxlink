@@ -3,13 +3,15 @@ use std::{
     fs,
     net::Ipv4Addr,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
 };
 
 pub const DISCOVERY_PORT: u16 = 4951;
 pub const WAITING_FOR_PHONE: &str =
     "Waiting for a phone: open Voxlink on the phone and tap Find my computer, or scan the QR code.";
 pub fn unauthorized_sender_message(ip: Ipv4Addr) -> String {
-    format!("Saw audio from {ip} but it is not paired. Enter this PC's pairing code on the phone, or set Phone IP manually.")
+    format!("Saw audio from {ip} but it is not paired. Approve its pairing request on this PC, or scan the QR code again from the phone.")
 }
 pub fn generate_code() -> String {
     rand::thread_rng().gen_range(100_000..1_000_000).to_string()
@@ -96,26 +98,107 @@ pub fn pairing_uri(bind_ip: &str, port: u16, code: &str) -> Result<String, Strin
     }
     Ok(format!("voxlink://{ip}:{port}?code={code}"))
 }
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingPairing {
+    pub request_id: u64,
+    pub phone_ip: Ipv4Addr,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClaimResponse {
+    Approved,
+    Pending,
+    Rejected,
+    Invalid,
+}
+static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
+const REJECTION_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct AuthGate {
     pinned: Option<Ipv4Addr>,
     authorized: Option<Ipv4Addr>,
+    pending: Option<(PendingPairing, Instant)>,
+    rejected: Option<(Ipv4Addr, Instant)>,
 }
 impl AuthGate {
     pub fn new(pinned: Option<Ipv4Addr>) -> Self {
         Self {
             pinned,
             authorized: None,
+            pending: None,
+            rejected: None,
         }
     }
-    pub fn claim(&mut self, claimer: Ipv4Addr, code: &str, current_code: &str) -> bool {
+    pub fn request(&mut self, source: Ipv4Addr, code: &str, current_code: &str) -> ClaimResponse {
+        self.expire_pending();
         if let Some(pin) = self.pinned {
-            return pin == claimer;
+            return if pin == source {
+                ClaimResponse::Approved
+            } else {
+                ClaimResponse::Rejected
+            };
         }
         if !is_valid_code(code) || code != current_code {
-            return false;
+            return ClaimResponse::Invalid;
         }
-        self.authorized = Some(claimer);
-        true
+        if self.authorized == Some(source) {
+            return ClaimResponse::Approved;
+        }
+        if self
+            .rejected
+            .is_some_and(|(ip, until)| ip == source && Instant::now() < until)
+        {
+            return ClaimResponse::Rejected;
+        }
+        if let Some((pending, _)) = &self.pending {
+            return if pending.phone_ip == source {
+                ClaimResponse::Pending
+            } else {
+                ClaimResponse::Rejected
+            };
+        }
+        self.pending = Some((
+            PendingPairing {
+                request_id: NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+                phone_ip: source,
+            },
+            Instant::now() + APPROVAL_TIMEOUT,
+        ));
+        ClaimResponse::Pending
+    }
+    pub fn expire_pending(&mut self) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(_, until)| Instant::now() >= *until)
+        {
+            let (pending, _) = self.pending.take().unwrap();
+            self.rejected = Some((pending.phone_ip, Instant::now() + REJECTION_TIMEOUT));
+        }
+    }
+    pub fn pending(&self) -> Option<PendingPairing> {
+        self.pending.as_ref().map(|(request, _)| request.clone())
+    }
+    pub fn respond(&mut self, request_id: u64, allow: bool) -> Result<Ipv4Addr, String> {
+        self.expire_pending();
+        let Some((request, _)) = self.pending.as_ref() else {
+            return Err("This pairing request has expired. Ask the phone to try again.".into());
+        };
+        if request.request_id != request_id {
+            return Err("This pairing request is no longer current.".into());
+        }
+        let ip = request.phone_ip;
+        self.pending = None;
+        if allow {
+            self.authorized = Some(ip);
+            self.rejected = None;
+        } else {
+            self.rejected = Some((ip, Instant::now() + REJECTION_TIMEOUT));
+        }
+        Ok(ip)
+    }
+    pub fn paired_phone(&self) -> Option<Ipv4Addr> {
+        self.pinned.or(self.authorized)
     }
     pub fn allows(&self, source: Ipv4Addr) -> bool {
         self.pinned.or(self.authorized()) == Some(source)
@@ -217,20 +300,52 @@ mod tests {
 mod policy_tests {
     use super::*;
     #[test]
-    fn authorization_rejects_wrong_codes_and_can_move_between_phones() {
+    fn approval_is_explicit_and_retries_are_idempotent() {
         let a = Ipv4Addr::new(192, 168, 1, 42);
         let b = Ipv4Addr::new(192, 168, 1, 77);
         let mut auth = AuthGate::new(None);
-        assert_eq!(auth.authorized(), None);
+        assert_eq!(auth.request(a, "000000", "482913"), ClaimResponse::Invalid);
+        assert!(auth.pending().is_none());
+        assert_eq!(auth.request(a, "482913", "482913"), ClaimResponse::Pending);
+        let request = auth.pending().unwrap();
         assert!(!auth.allows(a));
-        assert!(!auth.claim(a, "000000", "482913"));
-        assert!(!auth.allows(a));
-        assert!(auth.claim(a, "482913", "482913"));
+        assert_eq!(auth.request(a, "482913", "482913"), ClaimResponse::Pending);
+        assert_eq!(auth.pending().unwrap(), request);
+        assert!(auth.respond(request.request_id + 1, true).is_err());
+        auth.respond(request.request_id, true).unwrap();
+        assert!(auth.allows(a));
+        assert_eq!(auth.request(a, "482913", "482913"), ClaimResponse::Approved);
+        assert!(auth.pending().is_none());
+        assert_eq!(auth.request(b, "482913", "482913"), ClaimResponse::Pending);
         assert!(auth.allows(a));
         assert!(!auth.allows(b));
-        assert!(auth.claim(b, "482913", "482913"));
+        auth.respond(auth.pending().unwrap().request_id, true)
+            .unwrap();
         assert!(!auth.allows(a));
         assert!(auth.allows(b));
+    }
+    #[test]
+    fn rejected_and_expired_requests_never_authorize_or_reprompt_retries() {
+        let ip = Ipv4Addr::new(192, 168, 1, 42);
+        let mut auth = AuthGate::new(None);
+        auth.request(ip, "482913", "482913");
+        let first = auth.pending().unwrap().request_id;
+        auth.respond(first, false).unwrap();
+        assert!(!auth.allows(ip));
+        assert_eq!(
+            auth.request(ip, "482913", "482913"),
+            ClaimResponse::Rejected
+        );
+        assert!(auth.pending().is_none());
+        auth.rejected = None;
+        auth.request(ip, "482913", "482913");
+        let second = auth.pending().unwrap().request_id;
+        assert_ne!(first, second);
+        assert!(auth.respond(first, true).is_err());
+        auth.pending.as_mut().unwrap().1 = Instant::now() - Duration::from_secs(1);
+        assert!(auth.respond(second, true).is_err());
+        assert!(!auth.allows(ip));
+        assert!(auth.pending().is_none());
     }
     #[test]
     fn unreadable_or_invalid_persistence_does_not_block_startup() {
@@ -249,8 +364,8 @@ mod policy_tests {
         let mut auth = AuthGate::new(Some(a));
         assert!(auth.allows(a));
         assert!(!auth.allows(b));
-        assert!(auth.claim(a, "wrong", "482913"));
-        assert!(!auth.claim(b, "482913", "482913"));
+        assert_eq!(auth.request(a, "wrong", "482913"), ClaimResponse::Approved);
+        assert_eq!(auth.request(b, "482913", "482913"), ClaimResponse::Rejected);
         assert_eq!(auth.authorized(), None);
     }
     #[test]

@@ -1,6 +1,6 @@
 import QRCode from "qrcode";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Connection = "disconnected" | "connecting" | "connected" | "error";
 type LocalAddress = { name: string; ip: string };
@@ -25,6 +25,8 @@ type DesktopStatus = {
   error: string | null;
   recovery: string | null;
   pairingCode: string;
+  pairingState: "unpaired" | "pending" | "paired";
+  pendingPairing: { requestId: number; phoneIp: string } | null;
 };
 type Settings = { bindIp: string; phoneIp: string; port: string; timeoutMs: number };
 
@@ -48,6 +50,8 @@ const EMPTY_STATUS: DesktopStatus = {
   error: null,
   recovery: null,
   pairingCode: "",
+  pairingState: "unpaired",
+  pendingPairing: null,
 };
 
 const DEFAULT_SETTINGS: Settings = { bindIp: "", phoneIp: "", port: "4950", timeoutMs: 2500 };
@@ -75,9 +79,9 @@ function Icon({ name, size = 18 }: { name: "wave" | "wifi" | "mic" | "activity" 
   return <svg {...shared}>{paths[name]}</svg>;
 }
 
-function StatusPill({ state }: { state: Connection }) {
+function StatusPill({ state, label }: { state: Connection; label?: string }) {
   const labels: Record<Connection, string> = { disconnected: "Disconnected", connecting: "Connecting", connected: "Connected", error: "Error" };
-  return <span className={`status-pill ${state}`}><span className="status-dot" />{labels[state]}</span>;
+  return <span className={`status-pill ${state}`}><span className="status-dot" />{label ?? labels[state]}</span>;
 }
 
 function prettyNumber(value: number) {
@@ -91,6 +95,9 @@ function App() {
   const [qr, setQr] = useState("");
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [refreshingCode, setRefreshingCode] = useState(false);
+  const approvalDialog = useRef<HTMLDialogElement>(null);
+  const [decidingPairing, setDecidingPairing] = useState(false);
+  const [pairingDecisionError, setPairingDecisionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [appImageInstall, setAppImageInstall] = useState<AppImageInstallState>({ available: false, installed: false });
@@ -149,6 +156,26 @@ function App() {
     finally { setRefreshingCode(false); }
   }
 
+  useEffect(() => {
+    const dialog = approvalDialog.current;
+    setPairingDecisionError(null);
+    if (status.pendingPairing) {
+      if (dialog && !dialog.open) dialog.showModal();
+    } else if (dialog?.open) dialog.close();
+  }, [status.pendingPairing?.requestId]);
+
+  async function respondToPairing(allow: boolean) {
+    if (!status.pendingPairing || decidingPairing) return;
+    const requestId = status.pendingPairing.requestId;
+    setDecidingPairing(true);
+    setPairingDecisionError(null);
+    try {
+      await invoke("respond_to_pairing", { requestId, allow });
+      setStatus(await invoke<DesktopStatus>("get_status"));
+    } catch (error) { setPairingDecisionError(String(error)); }
+    finally { setDecidingPairing(false); }
+  }
+
   const active = status.listening;
   const meterWidth = useMemo(() => `${Math.min(100, Math.max(0, status.inputLevel * 100))}%`, [status.inputLevel]);
   const lastPacket = status.lastPacketAgoMs == null ? "No packets yet" : status.lastPacketAgoMs < 1000 ? "Just now" : `${(status.lastPacketAgoMs / 1000).toFixed(1)}s ago`;
@@ -198,14 +225,28 @@ function App() {
     }
   }
 
-  const connectionMessage = backendError ?? (active
-    ? settings.phoneIp.trim() ? `Locked to ${settings.phoneIp.trim()}`
-      : status.connection === "connected" ? `Paired ${status.phoneAddress}`
-        : `Pairing code ${status.pairingCode} · waiting for phone`
+  const connectionMessage = backendError ?? status.error ?? (active
+    ? status.pendingPairing ? `Phone ${status.pendingPairing.phoneIp} is requesting pairing. Allow or reject the request on this PC.`
+      : status.connection === "connected" ? `Receiving live audio from ${status.phoneAddress ?? "your phone"}.`
+        : status.pairingState === "paired" ? `Paired with ${status.phoneAddress ?? "your phone"}. ${status.lastPacketAgoMs == null ? "Waiting for audio — start streaming on the phone." : "Audio stopped — restart streaming on the phone."}`
+          : `Pairing code ${status.pairingCode} · waiting for a phone to request pairing`
     : "Start Voxlink to create the virtual microphone and listen for your phone.");
+  const connectionLabel = !active ? undefined : status.pendingPairing ? "Approval required"
+    : status.connection === "connected" ? "Receiving audio" : status.pairingState === "paired" ? "Paired · no audio" : "Waiting for phone";
+  const displayedConnection = active && status.connection !== "error" && status.connection !== "connected" ? "connecting" : status.connection;
 
   return (
     <main className="app-shell">
+      <dialog ref={approvalDialog} className="pairing-approval" role="alertdialog" aria-labelledby="pairing-approval-title" aria-describedby="pairing-approval-description" onCancel={(event) => { event.preventDefault(); void respondToPairing(false); }}>
+        <h2 id="pairing-approval-title">Allow this phone to pair?</h2>
+        <p id="pairing-approval-description">Phone <strong>{status.pendingPairing?.phoneIp}</strong> entered this PC’s pairing code. Allow it to send microphone audio to this computer?</p>
+        <p>Only approve a phone you recognize on your trusted Wi-Fi network.</p>
+        {pairingDecisionError && <p className="pairing-approval-error" role="alert">{pairingDecisionError}</p>}
+        <div className="pairing-approval-actions">
+          <button autoFocus className="button button-secondary" disabled={decidingPairing} onClick={() => void respondToPairing(false)}>Reject</button>
+          <button className="button button-primary" disabled={decidingPairing} onClick={() => void respondToPairing(true)}>{decidingPairing ? "Applying…" : "Allow pairing"}</button>
+        </div>
+      </dialog>
       <header className="topbar">
         <div className="brand-lockup">
           <div className="brand-mark"><Icon name="wave" size={23} /></div>
@@ -228,7 +269,7 @@ function App() {
         </div>
         <div className={`connection-card ${status.connection}`}>
           <div className="connection-orbit"><Icon name="wifi" size={29} /></div>
-          <div className="connection-card-copy"><span className="eyebrow">PHONE LINK</span><StatusPill state={status.connection} /><p>{connectionMessage}</p></div>
+          <div className="connection-card-copy"><span className="eyebrow">PHONE LINK</span><StatusPill state={displayedConnection} label={connectionLabel} /><p>{connectionMessage}</p></div>
           <div className="connection-corner" />
         </div>
       </section>
@@ -244,7 +285,7 @@ function App() {
           <div className="pairing-card" aria-label="Pair your phone">
             <div className="pairing-copy">
               <h3>Pair your phone</h3>
-              <p>{active ? "Open Voxlink on your phone. Tap Find my computer or Scan QR." : "Scan this code with Voxlink on your phone, then start listening before streaming."}</p>
+              <p>{active ? "Open Voxlink on your phone. Tap Find my computer or Scan QR, then approve its request on this PC." : "Scan this code with Voxlink on your phone, then start listening before streaming."}</p>
               <span className="pairing-code-label">Pairing code</span>
               <strong className="pairing-code">{status.pairingCode || "······"}</strong>
               <button className="button button-secondary" disabled={active || busy || refreshingCode} onClick={() => void refreshCode()}>{refreshingCode ? "Refreshing…" : "Refresh code"}</button>

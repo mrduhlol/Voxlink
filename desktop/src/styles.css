@@ -211,3 +211,11 @@ h1 span { color: var(--green); }
 .pairing-copy p[role="alert"] { color: var(--red); }
 
 .pairing-placeholder { flex: 0 1 176px; color: var(--soft); font-size: 13px; line-height: 1.5; }
+
+.pairing-approval { width: min(480px, calc(100vw - 48px)); padding: 28px; color: var(--bright); background: var(--panel-raised); border: 1px solid var(--line); border-radius: 14px; }
+.pairing-approval::backdrop { background: rgba(0,0,0,.65); }
+.pairing-approval h2 { margin: 0 0 16px; font-size: 22px; }
+.pairing-approval p { color: var(--soft); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.pairing-approval strong { color: var(--bright); font-family: var(--mono); }
+.pairing-approval-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.pairing-approval .pairing-approval-error { color: var(--red); }

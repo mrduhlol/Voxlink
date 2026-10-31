@@ -20,11 +20,12 @@ The Android download is a debug APK; Android may ask you to allow installation f
 1. Connect both devices to the same trusted Wi-Fi network.
 2. On the PC, choose its **PC Wi-Fi address**, leave **Phone IP address** empty, and click **Start listening**.
 3. On Android, tap **Find my computer**. If several PCs appear, choose the one whose pairing code matches the desktop. Or tap **Scan QR** and scan the desktop's QR code; camera permission is only needed for scanning.
-4. Tap **Start streaming**, allow microphone access, and select **Voxlink Microphone** in your call or recording app.
+4. Tap **Start streaming**, allow microphone access, then choose **Allow pairing** in the confirmation popup on the PC. The phone waits for that approval before capturing or sending audio.
+5. Once the PC shows **Receiving audio**, select **Voxlink Microphone** in your call or recording app.
 
 If discovery cannot find the PC, enter the PC's Wi-Fi IPv4 address, audio port (default `4950`), and six-digit pairing code manually on the phone. `localhost` and `127.0.0.1` refer to the phone itself, not the PC. You no longer need to find the phone's IP address for normal setup.
 
-The PC keeps the same pairing code across launches. To change it, stop listening and click **Refresh code**. Reconnect the phone using Find, QR, or the new code. Discovery uses UDP `4951`; audio uses UDP `4950` by default. Allow both on your trusted LAN, and check guest-network/client isolation if neither Find nor QR connects. Port `4951` is reserved for discovery.
+The PC keeps the same pairing code across launches. To change it, stop listening and click **Refresh code**. Reconnect the phone using Find, QR, or the new code. Discovery uses UDP `4951`; audio uses UDP `4950` by default. Allow both on your trusted LAN, and check guest-network/client isolation if neither Find nor QR connects. Port `4951` is reserved for discovery. Pairing requests wait up to 45 seconds on the phone; **Reject** or a timeout sends no microphone audio. A **Paired · no audio** label on the PC means approval succeeded but audio has not arrived; it is separate from **Receiving audio**. On a PC with UFW enabled, allow UDP `4950:4951` from the trusted Wi-Fi subnet; see [firewall troubleshooting](docs/omarchy-desktop.md#diagnostics-and-troubleshooting).
 
 ### Manual IP lock and legacy receiver
 
